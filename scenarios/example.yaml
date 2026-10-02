@@ -1,0 +1,25 @@
+version: "1.0"
+global:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout_seconds: 5
+
+scenarios:
+  - name: "User Profile Check"
+    interval_seconds: 60
+    steps:
+      - name: "Fetch User #1"
+        request:
+          method: "GET"
+          path: "/users/1"
+        expect:
+          status: 200
+          max_latency_ms: 1000
+          schema:
+            type: "object"
+            required: ["id", "name", "email"]
+            properties:
+              id: { type: "integer" }
+              name: { type: "string" }
+              email: { type: "string" }
+        extract:
+          user_email: "$.email"
