@@ -1,3 +1,10 @@
+"""Execution context and dynamic variable interpolation module for Proof.
+
+This module manages runtime state persistence across scenario steps, JSONPath
+variable extractions from API responses, string/nested payload interpolation,
+and built-in dynamic generators ($uuid, $timestamp,$timestamp_ms, $iso_timestamp,$random_int).
+"""
+
 import random
 import re
 import time
@@ -12,14 +19,16 @@ class ContextError(Exception):
 
 
 class ExecutionContext:
-    """Manages runtime state variables, dynamic variable generation ($uuid, $timestamp),
+    """Manages runtime state variables and performs payload interpolation and JSONPath extraction."""
 
-    string/payload interpolation, and JSONPath extraction across scenario steps.
-    """
-
-    VAR_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_.\$]+)\}")
+    VAR_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_.$]+)\}")
 
     def __init__(self, initial_vars: dict[str, Any] | None = None) -> None:
+        """Initializes execution context with optional pre-defined variables.
+
+        Args:
+            initial_vars: Initial dictionary of key-value state variables.
+        """
         self.variables: dict[str, Any] = initial_vars or {}
 
     def set(self, key: str, value: Any) -> None:
@@ -34,24 +43,36 @@ class ExecutionContext:
         """Evaluates built-in dynamic generators starting with '$'."""
         if var_name == "$uuid":
             return str(uuid.uuid4())
-        elif var_name == "$timestamp":
+        if var_name == "$timestamp":
             return int(time.time())
-        elif var_name == "$random_int":
+        if var_name == "$timestamp_ms":
+            return int(time.time() * 1000)
+        if var_name == "$iso_timestamp":
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        if var_name == "$random_int":
             return random.randint(1000, 9999)
         return None
 
     def extract_variables(
         self, payload: dict[str, Any] | list[Any], rules: dict[str, str]
     ) -> None:
-        """Extracts values from a JSON payload using JSONPath expressions."""
+        """Extracts values from a JSON payload using JSONPath expressions.
+
+        Args:
+            payload: JSON response payload (dict or list).
+            rules: Mapping of variable names to JSONPath expressions.
+
+        Raises:
+            ContextError: If a JSONPath expression is invalid or matches no values.
+        """
         for var_name, jsonpath_expr in rules.items():
             try:
                 expr = parse(jsonpath_expr)
                 matches = [match.value for match in expr.find(payload)]
-            except Exception as e:
+            except Exception as err:
                 raise ContextError(
-                    f"Invalid JSONPath expression '{jsonpath_expr}' for variable '{var_name}': {e}"
-                ) from e
+                    f"Invalid JSONPath expression '{jsonpath_expr}' for variable '{var_name}': {err}"
+                ) from err
 
             if not matches:
                 raise ContextError(
@@ -61,9 +82,19 @@ class ExecutionContext:
             self.variables[var_name] = matches[0]
 
     def interpolate_string(self, text: str) -> Any:
-        """Interpolates variables inside a string. Handles both state variables
+        """Interpolates variables inside a string.
 
-        and built-in dynamic variables ($uuid, $timestamp, $random_int).
+        Handles state variables and dynamic generators ($uuid, $timestamp,$timestamp_ms, $iso_timestamp,$random_int).
+        If text is an exact variable match (e.g. '${user_id}'), returns raw typed value.
+
+        Args:
+            text: Input string containing possible `${var}` patterns.
+
+        Returns:
+            Any: Interpolated string or raw typed object if exact match.
+
+        Raises:
+            ContextError: If a required variable is missing from the context.
         """
         exact_match = self.VAR_PATTERN.fullmatch(text.strip())
         if exact_match:
@@ -75,7 +106,9 @@ class ExecutionContext:
                     return dyn_val
 
             if var_name not in self.variables:
-                raise ContextError(f"Missing required context variable: '${{{var_name}}}'")
+                raise ContextError(
+                    f"Missing required context variable: '${{{var_name}}}'"
+                )
             return self.variables[var_name]
 
         def replace_var(match: re.Match[str]) -> str:
@@ -87,7 +120,9 @@ class ExecutionContext:
                     return str(dyn_val)
 
             if var_name not in self.variables:
-                raise ContextError(f"Missing required context variable: '${{{var_name}}}'")
+                raise ContextError(
+                    f"Missing required context variable: '${{{var_name}}}'"
+                )
             return str(self.variables[var_name])
 
         return self.VAR_PATTERN.sub(replace_var, text)
@@ -96,9 +131,8 @@ class ExecutionContext:
         """Recursively traverses dictionaries, lists, and strings to interpolate variables."""
         if isinstance(data, str):
             return self.interpolate_string(data)
-        elif isinstance(data, dict):
+        if isinstance(data, dict):
             return {k: self.interpolate_data(v) for k, v in data.items()}
-        elif isinstance(data, list):
+        if isinstance(data, list):
             return [self.interpolate_data(item) for item in data]
-        else:
-            return data
+        return data
