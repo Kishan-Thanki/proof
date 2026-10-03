@@ -1,0 +1,89 @@
+version: "1.0"
+
+global:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout_seconds: 10.0
+  headers:
+    User-Agent: "Proof-Synthetic-Daemon/0.1.0"
+    Accept: "application/json"
+
+scenarios:
+  - name: "User Identity and Post Creation Workflow"
+    interval_seconds: 30
+
+    steps:
+      - name: "1. Fetch Post and Extract User ID"
+        request:
+          method: "GET"
+          path: "/posts/1"
+        expect:
+          status: 200
+          max_latency_ms: 5000
+          schema:
+            type: "object"
+            required:
+              - userId
+              - id
+              - title
+            properties:
+              userId:
+                type: "integer"
+              id:
+                type: "integer"
+              title:
+                type: "string"
+        extract:
+          target_user_id: "$.userId"
+          post_title: "$.title"
+
+      - name: "2. Fetch User Profile Using Extracted ID"
+        request:
+          method: "GET"
+          path: "/users/${target_user_id}"
+        expect:
+          status: 200
+          max_latency_ms: 5000
+          schema:
+            type: "object"
+            required:
+              - id
+              - name
+              - email
+            properties:
+              id:
+                type: "integer"
+              name:
+                type: "string"
+              email:
+                type: "string"
+        extract:
+          user_email: "$.email"
+          user_name: "$.name"
+
+      - name: "3. Create Synthetic Post with Dynamic Data"
+        request:
+          method: "POST"
+          path: "/posts"
+          json:
+            title: "Synthetic Test Run ${$uuid}"
+            body: "Created by ${user_name} (${user_email}) at timestamp ${$timestamp}"
+            userId: "${target_user_id}"
+        expect:
+          status: 201
+          max_latency_ms: 5000
+          schema:
+            type: "object"
+            required:
+              - id
+              - title
+              - body
+              - userId
+            properties:
+              id:
+                type: "integer"
+              title:
+                type: "string"
+              body:
+                type: "string"
+              userId:
+                type: "integer"

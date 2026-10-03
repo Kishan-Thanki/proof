@@ -1,7 +1,11 @@
 version: "1.0"
+
 global:
   base_url: "https://jsonplaceholder.typicode.com"
-  timeout_seconds: 5
+  timeout_seconds: 5.0
+  headers:
+    User-Agent: "Proof-Synthetic-Daemon/0.1.0"
+    Accept: "application/json"
 
 scenarios:
   - name: "User Profile Check"
@@ -14,12 +18,22 @@ scenarios:
         expect:
           status: 200
           max_latency_ms: 1000
+          headers:
+            Content-Type: "application/json; charset=utf-8"
           schema:
             type: "object"
-            required: ["id", "name", "email"]
+            required:
+              - id
+              - name
+              - email
             properties:
-              id: { type: "integer" }
-              name: { type: "string" }
-              email: { type: "string" }
+              id:
+                type: "integer"
+              name:
+                type: "string"
+              email:
+                type: "string"
         extract:
+          user_id: "$.id"
+          user_name: "$.name"
           user_email: "$.email"

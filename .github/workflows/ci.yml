@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository (sparse)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            src
+            tests
+            scenarios
+            pyproject.toml
+            pytest.ini
+            uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run unit tests
+        run: uv run pytest tests/
+
+      - name: Smoke test example scenario
+        run: uv run proof run scenarios/example.yaml --once
+
+      - name: Smoke test sample scenario
+        run: uv run proof run scenarios/sample.yaml --once

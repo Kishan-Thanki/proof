@@ -1,12 +1,12 @@
 """Asynchronous HTTP execution engine for Proof synthetic monitoring.
 
-This module handles the async execution of HTTP monitoring scenarios using httpx,
-evaluates response assertions (status codes, headers, latency caps, AOT schemas),
-extracts runtime variables into ExecutionContext, and records high-resolution latency metrics.
+This module executes multi-step HTTP monitoring scenarios using httpx,
+evaluates response assertions, extracts runtime variables into
+ExecutionContext, and records high-resolution latency metrics.
 """
 
-import time
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 import httpx
@@ -21,7 +21,7 @@ class EngineError(Exception):
 
 @dataclass
 class StepResult:
-    """Execution outcome and performance metrics for an individual scenario step."""
+    """Execution outcome and performance metrics for one scenario step."""
 
     step_name: str
     passed: bool
@@ -32,7 +32,7 @@ class StepResult:
 
 @dataclass
 class ScenarioResult:
-    """Aggregated execution outcome for a complete multi-step scenario suite."""
+    """Aggregated execution outcome for a complete scenario."""
 
     scenario_name: str
     passed: bool
@@ -41,57 +41,72 @@ class ScenarioResult:
 
 
 class ScenarioRunner:
-    """Executes multi-step HTTP monitoring scenarios asynchronously using httpx."""
+    """Execute multi-step HTTP monitoring scenarios asynchronously."""
 
     def __init__(
-        self, scenario: ScenarioConfig, context: ExecutionContext | None = None
+        self,
+        scenario: ScenarioConfig,
+        context: ExecutionContext | None = None,
     ) -> None:
-        """Initializes scenario runner with target scenario and shared execution context.
+        """Initialize a scenario runner.
 
         Args:
-            scenario: Compiled scenario configuration containing ordered steps.
-            context: Shared execution context for state persistence across steps.
+            scenario: Compiled scenario configuration.
+            context: Optional execution context shared across steps.
         """
         self.scenario = scenario
         self.context = context if context is not None else ExecutionContext()
 
     async def execute_step(
-        self, step: StepConfig, client: httpx.AsyncClient
+        self,
+        step: StepConfig,
+        client: httpx.AsyncClient,
     ) -> StepResult:
-        """Executes a single scenario step asynchronously.
+        """Execute and validate a single scenario step.
 
-        Interpolates request data with context variables, dispatches the HTTP request,
-        evaluates response status code, headers, latency ceiling, and AOT schema assertions,
-        and extracts context variables for subsequent steps.
+        The execution pipeline is:
+
+        1. Validate the scenario base URL.
+        2. Validate the resolved request timeout.
+        3. Interpolate path, headers, query parameters, and JSON payload.
+        4. Execute the HTTP request.
+        5. Validate the HTTP status code.
+        6. Validate the latency ceiling.
+        7. Validate expected response headers.
+        8. Parse JSON when schema validation or extraction is required.
+        9. Validate the pre-compiled JSON schema.
+        10. Extract runtime variables for subsequent steps.
 
         Args:
-            step: Individual step configuration containing request and assertion rules.
-            client: Shared async httpx client instance.
+            step: Individual scenario step configuration.
+            client: Shared asynchronous HTTP client.
 
         Returns:
-            StepResult: Detailed metrics and pass/fail outcome for the step.
+            A StepResult describing success/failure and timing.
         """
-        if not self.scenario.base_url:
-            raise EngineError(
-                f"Scenario '{self.scenario.name}' is missing a valid base_url."
-            )
-
-        interpolated_path = self.context.interpolate_string(step.request.path)
-        base_url = str(self.scenario.base_url).rstrip("/")
-        full_url = f"{base_url}/{interpolated_path.lstrip('/')}"
-
-        headers = self.context.interpolate_data(step.request.headers)
-        params = self.context.interpolate_data(step.request.params)
-        json_payload = self.context.interpolate_data(step.request.json_payload)
-
-        if step.request.timeout is None:
-            raise EngineError(
-                f"Step '{step.name}' is missing a resolved request timeout."
-            )
-
-        start_time = time.perf_counter()
+        start_time = perf_counter()
+        response: httpx.Response | None = None
 
         try:
+            if not self.scenario.base_url:
+                raise EngineError(
+                    f"Scenario '{self.scenario.name}' is missing a valid base_url."
+                )
+
+            if step.request.timeout is None:
+                raise EngineError(
+                    f"Step '{step.name}' is missing a resolved request timeout."
+                )
+
+            interpolated_path = self.context.interpolate_string(step.request.path)
+
+            base_url = str(self.scenario.base_url).rstrip("/")
+            full_url = f"{base_url}/{str(interpolated_path).lstrip('/')}"
+
+            headers = self.context.interpolate_data(step.request.headers)
+            params = self.context.interpolate_data(step.request.params)
+            json_payload = self.context.interpolate_data(step.request.json_payload)
+
             response = await client.request(
                 method=step.request.method,
                 url=full_url,
@@ -100,12 +115,13 @@ class ScenarioRunner:
                 json=json_payload,
                 timeout=step.request.timeout,
             )
-            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            latency_ms = (perf_counter() - start_time) * 1000
 
             if response.status_code != step.expect.status:
                 raise EngineError(
-                    f"Status code mismatch: Expected {step.expect.status}, "
-                    f"got {response.status_code}"
+                    f"Status code mismatch: expected "
+                    f"{step.expect.status}, got {response.status_code}"
                 )
 
             if (
@@ -113,21 +129,24 @@ class ScenarioRunner:
                 and latency_ms > step.expect.max_latency_ms
             ):
                 raise EngineError(
-                    f"Latency limit exceeded: Response took {latency_ms:.2f} ms "
-                    f"(max allowed: {step.expect.max_latency_ms} ms)"
+                    f"Latency limit exceeded: response took "
+                    f"{latency_ms:.2f} ms "
+                    f"(max allowed: "
+                    f"{step.expect.max_latency_ms} ms)"
                 )
 
-            if step.expect.headers:
-                for expected_header, expected_val in step.expect.headers.items():
-                    actual_val = response.headers.get(expected_header)
-                    if actual_val != expected_val:
-                        raise EngineError(
-                            f"Header '{expected_header}' mismatch: "
-                            f"Expected '{expected_val}', got '{actual_val}'"
-                        )
+            for expected_header, expected_value in step.expect.headers.items():
+                actual_value = response.headers.get(expected_header)
+
+                if actual_value != expected_value:
+                    raise EngineError(
+                        f"Header '{expected_header}' mismatch: expected "
+                        f"'{expected_value}', got '{actual_value}'"
+                    )
 
             response_data: Any = None
-            if step.expect.compiled_schema or step.extract:
+
+            if step.expect.compiled_schema is not None or step.extract:
                 try:
                     response_data = response.json()
                 except Exception as err:
@@ -135,14 +154,17 @@ class ScenarioRunner:
                         f"Response body is not valid JSON: {err}"
                     ) from err
 
-            if step.expect.compiled_schema and response_data is not None:
+            if step.expect.compiled_schema is not None:
                 try:
                     step.expect.compiled_schema(response_data)
                 except Exception as err:
                     raise EngineError(f"Schema assertion failed: {err}") from err
 
-            if step.extract and response_data is not None:
-                self.context.extract_variables(response_data, step.extract)
+            if step.extract:
+                self.context.extract_variables(
+                    response_data,
+                    step.extract,
+                )
 
             return StepResult(
                 step_name=step.name,
@@ -152,13 +174,9 @@ class ScenarioRunner:
             )
 
         except Exception as err:  # noqa: BLE001
-            latency_ms = (time.perf_counter() - start_time) * 1000
+            latency_ms = (perf_counter() - start_time) * 1000
 
-            status_code = 0
-            if isinstance(err, httpx.HTTPStatusError) or hasattr(err, "response"):
-                resp = getattr(err, "response", None)
-                if resp is not None:
-                    status_code = resp.status_code
+            status_code = response.status_code if response is not None else 0
 
             return StepResult(
                 step_name=step.name,
@@ -169,14 +187,21 @@ class ScenarioRunner:
             )
 
     async def run(self) -> ScenarioResult:
-        """Executes all steps sequentially within the scenario context.
+        """Execute all scenario steps sequentially.
+
+        All steps share the same ExecutionContext, allowing values extracted
+        from earlier responses to be used by later requests.
+
+        Execution stops at the first failed step.
 
         Returns:
-            ScenarioResult: Aggregated result containing total latency and step results.
+            ScenarioResult containing the aggregate scenario outcome,
+            total execution latency, and individual step results.
         """
         step_results: list[StepResult] = []
         scenario_passed = True
-        total_start = time.perf_counter()
+
+        total_start = perf_counter()
 
         async with httpx.AsyncClient() as client:
             for step in self.scenario.steps:
@@ -187,7 +212,7 @@ class ScenarioRunner:
                     scenario_passed = False
                     break
 
-        total_latency_ms = (time.perf_counter() - total_start) * 1000
+        total_latency_ms = (perf_counter() - total_start) * 1000
 
         return ScenarioResult(
             scenario_name=self.scenario.name,

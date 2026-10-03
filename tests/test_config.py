@@ -1,4 +1,4 @@
-"""Unit tests for the declarative Pydantic configuration models."""
+"""Unit tests for declarative Pydantic configuration models."""
 
 import pytest
 from pydantic import ValidationError
@@ -13,7 +13,7 @@ from proof.core.config import (
 
 
 def test_global_config_default_factories() -> None:
-    """Verifies that headers generate fresh dictionaries for each instance."""
+    """Verifies headers generate fresh dictionaries for each instance."""
     config1 = GlobalConfig()
     config2 = GlobalConfig()
 
@@ -25,7 +25,7 @@ def test_global_config_default_factories() -> None:
 
 
 def test_global_config_timeout_must_be_positive() -> None:
-    """Verifies that the global timeout must be greater than zero."""
+    """Verifies global timeout must be greater than zero."""
     with pytest.raises(ValidationError):
         GlobalConfig(timeout_seconds=0)
 
@@ -33,8 +33,15 @@ def test_global_config_timeout_must_be_positive() -> None:
         GlobalConfig(timeout_seconds=-1)
 
 
+def test_global_config_base_url_can_be_omitted() -> None:
+    """Verifies global base_url may be omitted."""
+    config = GlobalConfig()
+
+    assert config.base_url is None
+
+
 def test_request_config_json_alias() -> None:
-    """Verifies that the YAML keyword 'json' properly maps to 'json_payload'."""
+    """Verifies YAML keyword 'json' maps to json_payload."""
     raw_yaml_data = {
         "method": "POST",
         "path": "/users",
@@ -47,7 +54,7 @@ def test_request_config_json_alias() -> None:
 
 
 def test_request_config_timeout_must_be_positive() -> None:
-    """Verifies that a step-specific timeout must be greater than zero."""
+    """Verifies step-specific timeout must be greater than zero."""
     with pytest.raises(ValidationError):
         RequestConfig(
             method="GET",
@@ -64,7 +71,7 @@ def test_request_config_timeout_must_be_positive() -> None:
 
 
 def test_request_config_timeout_can_be_none() -> None:
-    """Verifies that omitting a step-specific timeout remains valid."""
+    """Verifies omitted step timeout remains valid."""
     config = RequestConfig(
         method="GET",
         path="/",
@@ -75,32 +82,47 @@ def test_request_config_timeout_can_be_none() -> None:
 
 
 def test_expect_config_schema_alias() -> None:
-    """Verifies that the YAML keyword 'schema' properly maps to 'schema_data'."""
+    """Verifies YAML keyword 'schema' maps to schema_data."""
     raw_yaml_data = {
         "status": 200,
         "schema": {
             "type": "object",
             "required": ["id"],
-            "properties": {"id": {"type": "integer"}},
+            "properties": {
+                "id": {"type": "integer"},
+            },
         },
     }
 
     config = ExpectConfig(**raw_yaml_data)
 
-    assert config.schema_data == {
-        "type": "object",
-        "required": ["id"],
-        "properties": {"id": {"type": "integer"}},
-    }
+    assert config.schema_data == raw_yaml_data["schema"]
     assert config.compiled_schema is None
 
 
+def test_expect_config_max_latency_must_be_positive() -> None:
+    """Verifies max_latency_ms must be greater than zero."""
+    with pytest.raises(ValidationError):
+        ExpectConfig(
+            status=200,
+            max_latency_ms=0,
+        )
+
+    with pytest.raises(ValidationError):
+        ExpectConfig(
+            status=200,
+            max_latency_ms=-1,
+        )
+
+
 def test_step_config_missing_required_fields() -> None:
-    """Verifies that omitting a required block like 'expect' raises an error."""
+    """Verifies missing required blocks raise validation errors."""
     raw_step = {
         "name": "Invalid Step",
-        "request": {"method": "GET", "path": "/"},
-        # 'expect' block is missing!
+        "request": {
+            "method": "GET",
+            "path": "/",
+        },
     }
 
     with pytest.raises(ValidationError) as exc_info:
@@ -111,7 +133,7 @@ def test_step_config_missing_required_fields() -> None:
 
 
 def test_scenario_config_interval_must_be_positive() -> None:
-    """Verifies that the scenario execution interval must be greater than zero."""
+    """Verifies scenario interval must be greater than zero."""
     valid_step = StepConfig(
         name="Health Check",
         request=RequestConfig(
@@ -139,7 +161,7 @@ def test_scenario_config_interval_must_be_positive() -> None:
 
 
 def test_scenario_config_default_interval() -> None:
-    """Verifies that the default scenario interval is 60 seconds."""
+    """Verifies default scenario interval is 60 seconds."""
     valid_step = StepConfig(
         name="Health Check",
         request=RequestConfig(

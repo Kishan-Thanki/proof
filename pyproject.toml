@@ -18,7 +18,7 @@ dependencies = [
     "jsonpath-ng>=1.6.1",
     "PyYAML>=6.0.1",
     "typer>=0.11.0",
-    "rich>=13.7.0"
+    "rich>=13.7.0",
 ]
 
 [project.scripts]
@@ -26,3 +26,42 @@ proof = "proof.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/proof"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.8.0",
+    "pyright>=1.1.390",
+    "pre-commit>=4.0.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+]
+
+[tool.pyright]
+include = [
+    "src",
+    "tests",
+]
+extraPaths = [
+    "src",
+]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
