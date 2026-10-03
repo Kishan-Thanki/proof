@@ -48,6 +48,7 @@ def test_load_and_compile_config_integration() -> None:
 
     # Test executing the compiled schema function against invalid data
     invalid_payload = {"id": "not-an-int"}  # 'id' must be integer
+
     with pytest.raises(fastjsonschema.JsonSchemaValueException):
         schema_func(invalid_payload)
 
@@ -85,3 +86,88 @@ scenarios:
         load_and_compile_config(bad_yaml)
 
     assert "missing 'base_url'" in str(exc_info.value)
+
+
+def test_scenario_inherits_global_base_url(tmp_path: Path) -> None:
+    """Verifies that a scenario inherits base_url from the global configuration."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+version: "1.0"
+global:
+  base_url: "https://api.example.com"
+
+scenarios:
+  - name: "Inherited URL Scenario"
+    steps:
+      - name: "Health Check"
+        request:
+          method: "GET"
+          path: "/health"
+        expect:
+          status: 200
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    assert config.scenarios[0].base_url is not None
+    assert str(config.scenarios[0].base_url).rstrip("/") == "https://api.example.com"
+
+
+def test_step_inherits_global_timeout(tmp_path: Path) -> None:
+    """Verifies that a step inherits timeout from the global configuration."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+version: "1.0"
+global:
+  base_url: "https://api.example.com"
+  timeout_seconds: 7.5
+
+scenarios:
+  - name: "Inherited Timeout Scenario"
+    steps:
+      - name: "Health Check"
+        request:
+          method: "GET"
+          path: "/health"
+        expect:
+          status: 200
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    assert config.scenarios[0].steps[0].request.timeout == 7.5
+
+
+def test_step_timeout_overrides_global_timeout(tmp_path: Path) -> None:
+    """Verifies that a step-specific timeout takes precedence over the global timeout."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+version: "1.0"
+global:
+  base_url: "https://api.example.com"
+  timeout_seconds: 7.5
+
+scenarios:
+  - name: "Step Timeout Scenario"
+    steps:
+      - name: "Health Check"
+        request:
+          method: "GET"
+          path: "/health"
+          timeout: 3.0
+        expect:
+          status: 200
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    assert config.scenarios[0].steps[0].request.timeout == 3.0

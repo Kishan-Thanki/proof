@@ -14,7 +14,7 @@ import fastjsonschema
 import yaml
 from pydantic import ValidationError
 
-from proof.core.config import ProofConfig
+from proof.core.config import GlobalConfig, ProofConfig
 
 
 class ConfigCompilerError(Exception):
@@ -55,14 +55,10 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
     except ValidationError as err:
         raise ConfigCompilerError(f"Config validation failed:\n{err}") from err
 
-    global_base_url = (
-        str(config.global_config.base_url)
-        if config.global_config and config.global_config.base_url
-        else None
-    )
-    global_timeout = (
-        config.global_config.timeout_seconds if config.global_config else 10.0
-    )
+    global_config = config.global_config or GlobalConfig()
+
+    global_base_url = str(global_config.base_url) if global_config.base_url else None
+    global_timeout = global_config.timeout_seconds
 
     # Resolve scenario inheritance and compile JSON schemas ahead-of-time (AOT)
     for scenario in config.scenarios:
@@ -72,7 +68,8 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
                 scenario.base_url = global_base_url
             else:
                 raise ConfigCompilerError(
-                    f"Scenario '{scenario.name}' is missing 'base_url' and no global 'base_url' is defined."
+                    f"Scenario '{scenario.name}' is missing 'base_url' "
+                    "and no global 'base_url' is defined."
                 )
 
         for step in scenario.steps:
@@ -86,15 +83,18 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
 
                 if isinstance(step.expect.schema_data, dict):
                     raw_schema = step.expect.schema_data
+
                 elif isinstance(step.expect.schema_data, str):
                     schema_file = path.parent / step.expect.schema_data
+
                     if not schema_file.exists():
                         schema_file = Path(step.expect.schema_data)
 
                     if not schema_file.exists():
                         raise ConfigCompilerError(
                             f"JSON Schema file not found: '{step.expect.schema_data}' "
-                            f"(referenced in scenario '{scenario.name}', step '{step.name}')"
+                            f"(referenced in scenario '{scenario.name}', "
+                            f"step '{step.name}')"
                         )
 
                     try:
@@ -102,7 +102,8 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
                             raw_schema = json.load(sf)
                     except Exception as err:
                         raise ConfigCompilerError(
-                            f"Failed to read JSON schema file '{step.expect.schema_data}': {err}"
+                            f"Failed to read JSON schema file "
+                            f"'{step.expect.schema_data}': {err}"
                         ) from err
 
                 if raw_schema:
@@ -113,7 +114,8 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
                         )
                     except Exception as err:
                         raise ConfigCompilerError(
-                            f"Failed to compile JSON schema in scenario '{scenario.name}', "
+                            f"Failed to compile JSON schema in "
+                            f"scenario '{scenario.name}', "
                             f"step '{step.name}': {err}"
                         ) from err
 
