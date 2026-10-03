@@ -14,7 +14,30 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 class GlobalConfig(BaseModel):
-    """Global default settings applied across all scenarios and steps."""
+    """Global default settings applied across all scenarios and steps.
+
+    Example YAML snippet:
+        ```yaml
+        global:
+          base_url: "[https://api.example.com](https://api.example.com)"
+          timeout_seconds: 10.0
+          headers:
+            User-Agent: "Proof-Synthetic-Daemon/0.1.0"
+            Accept: "application/json"
+        ```
+
+    Example Python Object representation:
+        ```python
+        GlobalConfig(
+            base_url="[https://api.example.com](https://api.example.com)",
+            timeout_seconds=10.0,
+            headers={
+                "User-Agent": "Proof-Synthetic-Daemon/0.1.0",
+                "Accept": "application/json",
+            },
+        )
+        ```
+    """
 
     base_url: HttpUrl | str | None = Field(
         default=None, description="Default root URL target for scenarios."
@@ -28,7 +51,34 @@ class GlobalConfig(BaseModel):
 
 
 class RequestConfig(BaseModel):
-    """Defines the parameters for an outgoing HTTP request within a scenario step."""
+    """Defines the parameters for an outgoing HTTP request within a scenario step.
+
+    Example YAML snippet:
+        ```yaml
+        request:
+          method: "POST"
+          path: "/v1/users"
+          headers:
+            Content-Type: "application/json"
+          params:
+            role: "admin"
+          json:
+            username: "synth-bot"
+          timeout: 5.0
+        ```
+
+    Example Python Object representation:
+        ```python
+        RequestConfig(
+            method="POST",
+            path="/v1/users",
+            headers={"Content-Type": "application/json"},
+            params={"role": "admin"},
+            json_payload={"username": "synth-bot"},
+            timeout=5.0,
+        )
+        ```
+    """
 
     method: str = Field(..., description="HTTP method (e.g., GET, POST, PUT, DELETE).")
     path: str = Field(..., description="Endpoint path relative to base_url.")
@@ -50,7 +100,41 @@ class RequestConfig(BaseModel):
 
 
 class ExpectConfig(BaseModel):
-    """Defines assertion criteria evaluated against the HTTP response."""
+    """Defines assertion criteria evaluated against the HTTP response.
+
+    Example YAML snippet:
+        ```yaml
+        expect:
+          status: 201
+          headers:
+            Content-Type: "application/json; charset=utf-8"
+          max_latency_ms: 1500.0
+          schema:
+            type: "object"
+            required: ["id", "status"]
+            properties:
+              id: { type: "string" }
+              status: { type: "string" }
+        ```
+
+    Example Python Object representation:
+        ```python
+        ExpectConfig(
+            status=201,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            max_latency_ms=1500.0,
+            schema_data={
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string"},
+                },
+            },
+            compiled_schema=None,
+        )
+        ```
+    """
 
     status: int = Field(..., description="Expected HTTP status code (e.g., 200, 201).")
     headers: dict[str, str] = Field(
@@ -72,7 +156,40 @@ class ExpectConfig(BaseModel):
 
 
 class StepConfig(BaseModel):
-    """Represents an atomic execution step in a multi-step API scenario."""
+    """Represents an atomic execution step in a multi-step API scenario.
+
+    Example YAML snippet:
+        ```yaml
+        name: "Create Ephemeral User"
+        request:
+          method: "POST"
+          path: "/users"
+          json:
+            name: "Test User"
+        expect:
+          status: 201
+          max_latency_ms: 2000
+        extract:
+          user_id: "$.id"
+        ```
+
+    Example Python Object representation:
+        ```python
+        StepConfig(
+            name="Create Ephemeral User",
+            request=RequestConfig(
+                method="POST",
+                path="/users",
+                json_payload={"name": "Test User"},
+            ),
+            expect=ExpectConfig(
+                status=201,
+                max_latency_ms=2000.0,
+            ),
+            extract={"user_id": "$.id"},
+        )
+        ```
+    """
 
     name: str = Field(
         ..., description="Human-readable identifier for the scenario step."
@@ -86,7 +203,38 @@ class StepConfig(BaseModel):
 
 
 class ScenarioConfig(BaseModel):
-    """Defines a sequence of dependent execution steps against a target host."""
+    """Defines a sequence of dependent execution steps against a target host.
+
+    Example YAML snippet:
+        ```yaml
+        name: "User Authentication & Registration Lifecycle"
+        base_url: "[https://api.example.com](https://api.example.com)"
+        interval_seconds: 120
+        steps:
+          - name: "1. Fetch Public Config"
+            request:
+              method: "GET"
+              path: "/config"
+            expect:
+              status: 200
+        ```
+
+    Example Python Object representation:
+        ```python
+        ScenarioConfig(
+            name="User Authentication & Registration Lifecycle",
+            base_url="[https://api.example.com](https://api.example.com)",
+            interval_seconds=120,
+            steps=[
+                StepConfig(
+                    name="1. Fetch Public Config",
+                    request=RequestConfig(method="GET", path="/config"),
+                    expect=ExpectConfig(status=200),
+                )
+            ],
+        )
+        ```
+    """
 
     name: str = Field(..., description="Human-readable scenario suite name.")
     base_url: HttpUrl | str | None = Field(
@@ -102,7 +250,48 @@ class ScenarioConfig(BaseModel):
 
 
 class ProofConfig(BaseModel):
-    """Root configuration model representing a parsed Proof YAML scenario file."""
+    """Root configuration model representing a parsed Proof YAML scenario file.
+
+    Example YAML snippet:
+        ```yaml
+        version: "1.0"
+        global:
+          base_url: "[https://jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com)"
+          timeout_seconds: 10.0
+        scenarios:
+          - name: "Health Verification"
+            steps:
+              - name: "Ping Endpoint"
+                request:
+                  method: "GET"
+                  path: "/posts/1"
+                expect:
+                  status: 200
+        ```
+
+    Example Python Object representation:
+        ```python
+        ProofConfig(
+            version="1.0",
+            global_config=GlobalConfig(
+                base_url="[https://jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com)",
+                timeout_seconds=10.0,
+            ),
+            scenarios=[
+                ScenarioConfig(
+                    name="Health Verification",
+                    steps=[
+                        StepConfig(
+                            name="Ping Endpoint",
+                            request=RequestConfig(method="GET", path="/posts/1"),
+                            expect=ExpectConfig(status=200),
+                        )
+                    ],
+                )
+            ],
+        )
+        ```
+    """
 
     version: str = Field(default="1.0", description="Configuration schema version.")
     global_config: GlobalConfig | None = Field(
