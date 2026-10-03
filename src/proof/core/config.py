@@ -43,7 +43,9 @@ class GlobalConfig(BaseModel):
         default=None, description="Default root URL target for scenarios."
     )
     timeout_seconds: float = Field(
-        default=10.0, description="Default HTTP request timeout ceiling in seconds."
+        default=10.0,
+        gt=0,
+        description="Default HTTP request timeout ceiling in seconds.",
     )
     headers: dict[str, str] = Field(
         default_factory=dict, description="Default HTTP headers sent with all requests."
@@ -95,6 +97,7 @@ class RequestConfig(BaseModel):
     )
     timeout: float | None = Field(
         default=None,
+        gt=0,
         description="Step-specific HTTP request timeout ceiling in seconds.",
     )
 
@@ -241,7 +244,7 @@ class ScenarioConfig(BaseModel):
         default=None, description="Root URL target for all steps in this scenario."
     )
     interval_seconds: int = Field(
-        default=60, description="Execution interval in seconds for the scenario."
+        default=60, gt=0, description="Execution interval in seconds for the scenario."
     )
     steps: list[StepConfig] = Field(
         ...,
