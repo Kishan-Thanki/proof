@@ -3,7 +3,10 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -11,14 +14,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository (sparse)
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            src
-            pyproject.toml
-            README.md
-            LICENSE
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,7 +28,7 @@ jobs:
       - name: Build wheel and sdist
         run: uv build
 
-      - name: Upload dist artifacts
+      - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -44,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout scenarios (sparse)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
@@ -55,7 +52,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Download dist artifacts
+      - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
@@ -64,11 +61,14 @@ jobs:
       - name: Install built wheel
         run: pip install dist/*.whl
 
+      - name: Verify installed version
+        run: proof --version
+
       - name: Smoke test example scenario
-        run: proof run scenarios/example.yaml --once
+        run: proof run scenarios/example.yaml
 
       - name: Smoke test sample scenario
-        run: proof run scenarios/sample.yaml --once
+        run: proof run scenarios/sample.yaml
 
   release:
     name: Create GitHub Release
@@ -78,13 +78,13 @@ jobs:
       contents: write
 
     steps:
-      - name: Download dist artifacts
+      - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
-      - name: Create GitHub Release and Upload Artifacts
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
@@ -96,10 +96,10 @@ jobs:
   #   runs-on: ubuntu-latest
   #   environment: pypi
   #   permissions:
-  #     id-token: write  # Required for OIDC trusted publishing
+  #     id-token: write
   #
   #   steps:
-  #     - name: Download dist artifacts
+  #     - name: Download distribution artifacts
   #       uses: actions/download-artifact@v4
   #       with:
   #         name: dist
