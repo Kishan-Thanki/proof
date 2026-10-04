@@ -1,12 +1,17 @@
 """Unit tests for Proof CLI interface."""
 
+import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
-from proof.cli import app
+from proof.cli import app, execute_config, render_scenario_result
+from proof.core.config import ProofConfig
+from proof.core.engine import ScenarioResult, StepResult
+from proof.core.state import StateManager, Status
 
 runner = CliRunner()
 
@@ -346,3 +351,394 @@ scenarios:
 
     assert result.exit_code == 0
     assert "Known Good Scenario" in result.stdout
+
+
+def test_execute_config_no_valid_config() -> None:
+    """Verifies execution fails when no valid configuration is available."""
+    config_manager = Mock()
+    config_manager.load.return_value = (
+        None,
+        Exception("Invalid configuration"),
+    )
+
+    async def run_test() -> tuple[bool, int]:
+        async with httpx.AsyncClient() as client:
+            return await execute_config(config_manager, client)
+
+    with patch("proof.cli.console.print") as mock_print:
+        result = asyncio.run(run_test())
+
+    assert result == (False, 60)
+    assert mock_print.call_count == 1
+    assert "Configuration Error" in mock_print.call_args.args[0]
+
+
+def test_execute_config_config_error_with_last_known_good() -> None:
+    """Verifies execution continues with the last known-good configuration."""
+    proof_config = ProofConfig.model_validate(
+        {
+            "version": "1.0",
+            "global": {
+                "base_url": "https://example.com",
+            },
+            "scenarios": [
+                {
+                    "name": "Known Good",
+                    "interval_seconds": 30,
+                    "steps": [
+                        {
+                            "name": "Ping",
+                            "request": {
+                                "method": "GET",
+                                "path": "/",
+                            },
+                            "expect": {
+                                "status": 200,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    config_manager = Mock()
+    config_manager.load.return_value = (
+        proof_config,
+        Exception("Reload failed"),
+    )
+
+    result = ScenarioResult(
+        scenario_name="Known Good",
+        passed=True,
+        step_results=[],
+        total_latency_ms=1.0,
+    )
+
+    with patch(
+        "proof.cli.ScenarioRunner.run",
+        new_callable=AsyncMock,
+        return_value=result,
+    ):
+        with patch("proof.cli.render_scenario_result"):
+            with patch("proof.cli.console.print") as mock_print:
+
+                async def run_test() -> tuple[bool, int]:
+                    async with httpx.AsyncClient() as client:
+                        return await execute_config(
+                            config_manager,
+                            client,
+                        )
+
+                actual = asyncio.run(run_test())
+
+    assert actual == (True, 30)
+    mock_print.assert_any_call("[yellow]Using last known-good configuration.[/yellow]")
+
+
+def test_execute_config_empty_scenarios() -> None:
+    """Verifies execution returns the default interval for no scenarios."""
+    proof_config = ProofConfig.model_validate(
+        {
+            "version": "1.0",
+            "global": {
+                "base_url": "https://example.com",
+            },
+            "scenarios": [],
+        }
+    )
+
+    config_manager = Mock()
+    config_manager.load.return_value = (proof_config, None)
+
+    async def run_test() -> tuple[bool, int]:
+        async with httpx.AsyncClient() as client:
+            return await execute_config(config_manager, client)
+
+    with patch("proof.cli.render_scenario_result"):
+        result = asyncio.run(run_test())
+
+    assert result == (True, 60)
+
+
+def test_execute_config_state_manager_without_transition() -> None:
+    """Verifies state manager updates do not notify when no transition occurs."""
+    proof_config = ProofConfig.model_validate(
+        {
+            "version": "1.0",
+            "global": {
+                "base_url": "https://example.com",
+            },
+            "scenarios": [
+                {
+                    "name": "Healthy Scenario",
+                    "interval_seconds": 20,
+                    "steps": [
+                        {
+                            "name": "Ping",
+                            "request": {
+                                "method": "GET",
+                                "path": "/",
+                            },
+                            "expect": {
+                                "status": 200,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    config_manager = Mock()
+    config_manager.load.return_value = (proof_config, None)
+
+    result = ScenarioResult(
+        scenario_name="Healthy Scenario",
+        passed=True,
+        step_results=[],
+        total_latency_ms=1.0,
+    )
+
+    state_manager = StateManager()
+
+    with patch(
+        "proof.cli.ScenarioRunner.run",
+        new_callable=AsyncMock,
+        return_value=result,
+    ):
+        with patch("proof.cli.render_scenario_result"):
+            notifier = Mock()
+            notifier.notify = AsyncMock()
+
+            async def run_test() -> tuple[bool, int]:
+                async with httpx.AsyncClient() as client:
+                    return await execute_config(
+                        config_manager,
+                        client,
+                        state_manager,
+                        notifier,
+                    )
+
+            actual = asyncio.run(run_test())
+
+    assert actual == (True, 20)
+    notifier.notify.assert_not_awaited()
+
+
+def test_render_scenario_result_passed() -> None:
+    """Verifies successful scenario rendering."""
+    result = ScenarioResult(
+        scenario_name="Passing Scenario",
+        passed=True,
+        step_results=[
+            StepResult(
+                step_name="GET /health",
+                passed=True,
+                status_code=200,
+                latency_ms=12.34,
+                error=None,
+            )
+        ],
+        total_latency_ms=12.34,
+    )
+
+    with patch("proof.cli.console.print") as mock_print:
+        render_scenario_result(result)
+
+    assert mock_print.call_count == 3
+
+    table = mock_print.call_args_list[0].args[0]
+    panel = mock_print.call_args_list[1].args[0]
+
+    assert table.title == "Scenario: [bold white]Passing Scenario[/bold white]"
+    assert panel.border_style == "green"
+
+
+def test_render_scenario_result_failed() -> None:
+    """Verifies failed scenario rendering and error details."""
+    result = ScenarioResult(
+        scenario_name="Failed Scenario",
+        passed=False,
+        step_results=[
+            StepResult(
+                step_name="GET /health",
+                passed=False,
+                status_code=500,
+                latency_ms=45.67,
+                error="Internal Server Error",
+            )
+        ],
+        total_latency_ms=45.67,
+    )
+
+    with patch("proof.cli.console.print") as mock_print:
+        render_scenario_result(result)
+
+    assert mock_print.call_count == 3
+
+    table = mock_print.call_args_list[0].args[0]
+    panel = mock_print.call_args_list[1].args[0]
+
+    assert table.title == "Scenario: [bold white]Failed Scenario[/bold white]"
+    assert panel.border_style == "red"
+
+
+def test_execute_config_failure_transition_notifies() -> None:
+    """Verifies failing state transitions dispatch notifications."""
+    proof_config = ProofConfig.model_validate(
+        {
+            "version": "1.0",
+            "global": {
+                "base_url": "https://example.com",
+            },
+            "scenarios": [
+                {
+                    "name": "Failing Scenario",
+                    "interval_seconds": 15,
+                    "steps": [
+                        {
+                            "name": "Ping",
+                            "request": {
+                                "method": "GET",
+                                "path": "/",
+                            },
+                            "expect": {
+                                "status": 200,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    config_manager = Mock()
+    config_manager.load.return_value = (proof_config, None)
+
+    result = ScenarioResult(
+        scenario_name="Failing Scenario",
+        passed=False,
+        step_results=[
+            StepResult(
+                step_name="Ping",
+                passed=False,
+                status_code=500,
+                latency_ms=10.0,
+                error="Server error",
+            )
+        ],
+        total_latency_ms=10.0,
+    )
+
+    notifier = Mock()
+    notifier.notify = AsyncMock()
+    state_manager = StateManager()
+
+    with patch(
+        "proof.cli.ScenarioRunner.run",
+        new_callable=AsyncMock,
+        return_value=result,
+    ):
+        with patch("proof.cli.render_scenario_result"):
+
+            async def run_test() -> tuple[bool, int]:
+                async with httpx.AsyncClient() as client:
+                    return await execute_config(
+                        config_manager,
+                        client,
+                        state_manager,
+                        notifier,
+                    )
+
+            actual = asyncio.run(run_test())
+
+    assert actual == (False, 15)
+    notifier.notify.assert_awaited_once()
+
+    event = notifier.notify.call_args.args[0]
+    assert event.scenario_name == "Failing Scenario"
+    assert event.old_status == Status.UNKNOWN
+    assert event.new_status == Status.FAILING
+    assert "Ping: Server error" in event.details
+
+
+def test_execute_config_recovery_transition_notifies() -> None:
+    """Verifies failing-to-healthy transitions dispatch notifications."""
+    proof_config = ProofConfig.model_validate(
+        {
+            "version": "1.0",
+            "global": {
+                "base_url": "https://example.com",
+            },
+            "scenarios": [
+                {
+                    "name": "Recovery Scenario",
+                    "interval_seconds": 15,
+                    "steps": [
+                        {
+                            "name": "Ping",
+                            "request": {
+                                "method": "GET",
+                                "path": "/",
+                            },
+                            "expect": {
+                                "status": 200,
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    config_manager = Mock()
+    config_manager.load.return_value = (proof_config, None)
+
+    result = ScenarioResult(
+        scenario_name="Recovery Scenario",
+        passed=True,
+        step_results=[
+            StepResult(
+                step_name="Ping",
+                passed=True,
+                status_code=200,
+                latency_ms=10.0,
+                error=None,
+            )
+        ],
+        total_latency_ms=10.0,
+    )
+
+    notifier = Mock()
+    notifier.notify = AsyncMock()
+
+    state_manager = StateManager()
+    state_manager.update("Recovery Scenario", False)
+
+    with patch(
+        "proof.cli.ScenarioRunner.run",
+        new_callable=AsyncMock,
+        return_value=result,
+    ):
+        with patch("proof.cli.render_scenario_result"):
+
+            async def run_test() -> tuple[bool, int]:
+                async with httpx.AsyncClient() as client:
+                    return await execute_config(
+                        config_manager,
+                        client,
+                        state_manager,
+                        notifier,
+                    )
+
+            actual = asyncio.run(run_test())
+
+    assert actual == (True, 15)
+    notifier.notify.assert_awaited_once()
+
+    event = notifier.notify.call_args.args[0]
+    assert event.scenario_name == "Recovery Scenario"
+    assert event.old_status == Status.FAILING
+    assert event.new_status == Status.HEALTHY
+    assert event.details == "All steps passing."

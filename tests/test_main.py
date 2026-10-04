@@ -1,18 +1,19 @@
 """Unit tests for the Proof CLI entrypoint."""
 
-import subprocess
-import sys
+import runpy
+from unittest.mock import patch
 
 
 def test_main_execution() -> None:
-    """Verifies that python -m proof invokes the Typer app correctly."""
-    result = subprocess.run(
-        [sys.executable, "-m", "proof", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Verifies that the module entrypoint installs uvloop and starts the CLI."""
+    with (
+        patch("uvloop.install") as mock_install,
+        patch("proof.cli.app") as mock_app,
+    ):
+        runpy.run_module(
+            "proof.__main__",
+            run_name="__main__",
+        )
 
-    assert result.returncode == 0
-    assert "Usage:" in result.stdout
-    assert "run" in result.stdout
+    mock_install.assert_called_once()
+    mock_app.assert_called_once()

@@ -28,7 +28,7 @@ class Notifier(Protocol):
 
     async def notify(self, event: NotificationEvent) -> None:
         """Deliver a notification event."""
-        ...
+        ...  # pragma: no cover
 
 
 class WebhookNotifier:
