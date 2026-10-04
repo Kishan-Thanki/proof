@@ -233,3 +233,20 @@ def test_error_handling() -> None:
             {"status": "ok"},
             {"bad_syntax": "$[invalid_jsonpath"},
         )
+
+
+def test_unknown_dynamic_variable_raises_error() -> None:
+    """Verifies unknown built-in dynamic variables raise a
+    missing context variable error."""
+    ctx = ExecutionContext()
+
+    with pytest.raises(ContextError, match="Missing required context variable"):
+        ctx.interpolate_string("${$unknown_generator}")
+
+
+def test_unknown_dynamic_variable_in_string_raises_error() -> None:
+    """Verifies unknown dynamic variables inside composite strings raise errors."""
+    ctx = ExecutionContext()
+
+    with pytest.raises(ContextError, match="Missing required context variable"):
+        ctx.interpolate_string("prefix_${$invalid}_suffix")
