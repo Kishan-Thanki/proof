@@ -1,11 +1,18 @@
-"""Unit and integration tests for Proof configuration compiler."""
+"""Exhaustive unit and integration tests for Proof configuration compiler."""
 
+from __future__ import annotations
+
+import json
 from pathlib import Path
 
 import fastjsonschema
 import pytest
 
 from proof.core.compiler import ConfigCompilerError, load_and_compile_config
+
+# ============================================================================
+# Integration & File Loading Tests
+# ============================================================================
 
 
 def test_load_and_compile_config_integration() -> None:
@@ -61,7 +68,7 @@ def test_load_and_compile_file_not_found() -> None:
 
 
 def test_load_and_compile_invalid_yaml(tmp_path: Path) -> None:
-    """Verifies malformed YAML raises ConfigCompilerError."""
+    """Verifies malformed YAML syntax raises ConfigCompilerError."""
     config_path = tmp_path / "invalid.yaml"
 
     config_path.write_text(
@@ -80,14 +87,26 @@ global:
     assert "Invalid YAML syntax" in str(exc_info.value)
 
 
+def test_load_and_compile_os_error_reading_file(tmp_path: Path) -> None:
+    """Verifies OSError during file reading
+    (e.g. passing a directory path) raises ConfigCompilerError."""
+    dir_path = tmp_path / "directory_as_file.yaml"
+    dir_path.mkdir()
+
+    with pytest.raises(ConfigCompilerError) as exc_info:
+        load_and_compile_config(dir_path)
+
+    assert "Failed to read configuration file" in str(exc_info.value)
+
+
 def test_load_and_compile_non_mapping_yaml(tmp_path: Path) -> None:
-    """Verifies a non-mapping YAML document is rejected."""
+    """Verifies a top-level YAML list/scalar instead of a mapping is rejected."""
     config_path = tmp_path / "invalid.yaml"
 
     config_path.write_text(
         """
-- one
-- two
+- item_one
+- item_two
 """,
         encoding="utf-8",
     )
@@ -98,8 +117,31 @@ def test_load_and_compile_non_mapping_yaml(tmp_path: Path) -> None:
     assert "Expected a top-level YAML mapping" in str(exc_info.value)
 
 
+def test_load_and_compile_pydantic_validation_error(tmp_path: Path) -> None:
+    """Verifies Pydantic schema validation failures raise ConfigCompilerError."""
+    config_path = tmp_path / "invalid_schema.yaml"
+
+    config_path.write_text(
+        """
+version: "2.0"
+scenarios: []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigCompilerError) as exc_info:
+        load_and_compile_config(config_path)
+
+    assert "Config validation failed" in str(exc_info.value)
+
+
+# ============================================================================
+# Inheritance & Default Resolution Tests
+# ============================================================================
+
+
 def test_load_and_compile_missing_base_url(tmp_path: Path) -> None:
-    """Verifies compilation fails when base_url is missing."""
+    """Verifies compilation fails when both scenario and global base_url are omitted."""
     config_path = tmp_path / "bad_config.yaml"
 
     config_path.write_text(
@@ -153,6 +195,35 @@ scenarios:
 
     assert config.scenarios[0].base_url is not None
     assert str(config.scenarios[0].base_url).rstrip("/") == "https://api.example.com"
+
+
+def test_scenario_with_own_base_url_and_no_global(tmp_path: Path) -> None:
+    """Verifies scenario works when specifying its own
+    base_url without any global block."""
+    config_path = tmp_path / "config.yaml"
+
+    config_path.write_text(
+        """
+version: "1.0"
+
+scenarios:
+  - name: "Self-Contained Scenario"
+    base_url: "https://self.example.com"
+    steps:
+      - name: "Ping"
+        request:
+          method: "GET"
+          path: "/ping"
+        expect:
+          status: 200
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    assert str(config.scenarios[0].base_url).rstrip("/") == "https://self.example.com"
+    assert config.scenarios[0].steps[0].request.timeout == 10.0
 
 
 def test_step_inherits_global_timeout(tmp_path: Path) -> None:
@@ -216,9 +287,7 @@ scenarios:
     assert config.scenarios[0].steps[0].request.timeout == 3.0
 
 
-def test_global_headers_are_merged_with_step_headers(
-    tmp_path: Path,
-) -> None:
+def test_global_headers_are_merged_with_step_headers(tmp_path: Path) -> None:
     """Verifies global headers are inherited and step headers override them."""
     config_path = tmp_path / "config.yaml"
 
@@ -259,6 +328,40 @@ scenarios:
         "X-Shared": "step",
         "X-Step": "true",
     }
+
+
+def test_step_without_schema_continues(tmp_path: Path) -> None:
+    """Verifies steps without schema skip schema compilation cleanly."""
+    config_path = tmp_path / "config.yaml"
+
+    config_path.write_text(
+        """
+version: "1.0"
+
+global:
+  base_url: "https://api.example.com"
+
+scenarios:
+  - name: "No Schema Scenario"
+    steps:
+      - name: "Simple Step"
+        request:
+          method: "GET"
+          path: "/status"
+        expect:
+          status: 200
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    assert config.scenarios[0].steps[0].expect.compiled_schema is None
+
+
+# ============================================================================
+# Schema Compilation & Resolution Edge Cases
+# ============================================================================
 
 
 def test_inline_schema_is_compiled(tmp_path: Path) -> None:
@@ -303,23 +406,22 @@ scenarios:
         schema_func({"id": "invalid"})
 
 
-def test_external_schema_is_compiled(tmp_path: Path) -> None:
-    """Verifies JSON schema files are resolved relative to YAML."""
-    schema_path = tmp_path / "user_schema.json"
-    config_path = tmp_path / "config.yaml"
+def test_external_schema_compiled_relative_to_yaml_dir(tmp_path: Path) -> None:
+    """Verifies JSON schema files are resolved relative to the YAML directory."""
+    sub_dir = tmp_path / "subdir"
+    sub_dir.mkdir()
+
+    schema_path = sub_dir / "user_schema.json"
+    config_path = sub_dir / "config.yaml"
 
     schema_path.write_text(
-        """
-{
-  "type": "object",
-  "required": ["id"],
-  "properties": {
-    "id": {
-      "type": "integer"
-    }
-  }
-}
-""",
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "integer"}},
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -352,6 +454,56 @@ scenarios:
     assert schema_func({"id": 1}) == {"id": 1}
 
 
+def test_external_schema_compiled_relative_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies fallback resolution of external schema relative
+    to current working directory."""
+    yaml_dir = tmp_path / "yaml_dir"
+    yaml_dir.mkdir()
+
+    cwd_dir = tmp_path / "cwd_dir"
+    cwd_dir.mkdir()
+
+    monkeypatch.chdir(cwd_dir)
+
+    # Schema file exists ONLY in CWD, NOT in yaml_dir
+    schema_in_cwd = cwd_dir / "cwd_schema.json"
+    schema_in_cwd.write_text(
+        json.dumps({"type": "object", "required": ["ok"]}),
+        encoding="utf-8",
+    )
+
+    config_path = yaml_dir / "config.yaml"
+    config_path.write_text(
+        """
+version: "1.0"
+
+global:
+  base_url: "https://api.example.com"
+
+scenarios:
+  - name: "CWD Schema Scenario"
+    steps:
+      - name: "Step 1"
+        request:
+          method: "GET"
+          path: "/"
+        expect:
+          status: 200
+          schema: "cwd_schema.json"
+""",
+        encoding="utf-8",
+    )
+
+    config = load_and_compile_config(config_path)
+
+    schema_func = config.scenarios[0].steps[0].expect.compiled_schema
+
+    assert schema_func is not None
+    assert schema_func({"ok": True}) == {"ok": True}
+
+
 def test_missing_external_schema_raises_error(tmp_path: Path) -> None:
     """Verifies missing external schema raises ConfigCompilerError."""
     config_path = tmp_path / "config.yaml"
@@ -381,3 +533,69 @@ scenarios:
         load_and_compile_config(config_path)
 
     assert "JSON Schema file not found" in str(exc_info.value)
+
+
+def test_external_schema_invalid_json_raises_error(tmp_path: Path) -> None:
+    """Verifies JSON decode errors or
+    file read errors on schema files raise ConfigCompilerError."""
+    schema_path = tmp_path / "bad_schema.json"
+    schema_path.write_text("{ invalid json structure", encoding="utf-8")
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+version: "1.0"
+
+global:
+  base_url: "https://api.example.com"
+
+scenarios:
+  - name: "Bad JSON Schema Scenario"
+    steps:
+      - name: "Step 1"
+        request:
+          method: "GET"
+          path: "/"
+        expect:
+          status: 200
+          schema: "bad_schema.json"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigCompilerError) as exc_info:
+        load_and_compile_config(config_path)
+
+    assert "Failed to read JSON schema file" in str(exc_info.value)
+
+
+def test_invalid_json_schema_definition_raises_error(tmp_path: Path) -> None:
+    """Verifies invalid schema definitions cause fastjsonschema compilation failure."""
+    config_path = tmp_path / "config.yaml"
+
+    config_path.write_text(
+        """
+version: "1.0"
+
+global:
+  base_url: "https://api.example.com"
+
+scenarios:
+  - name: "Invalid Schema Structure Scenario"
+    steps:
+      - name: "Step 1"
+        request:
+          method: "GET"
+          path: "/"
+        expect:
+          status: 200
+          schema:
+            type: "non_existent_json_type"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigCompilerError) as exc_info:
+        load_and_compile_config(config_path)
+
+    assert "Failed to compile JSON schema" in str(exc_info.value)

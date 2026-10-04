@@ -65,7 +65,6 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
     global_headers = global_config.headers
 
     for scenario in config.scenarios:
-        # Resolve scenario base URL.
         if scenario.base_url is None:
             if global_base_url is None:
                 raise ConfigCompilerError(
@@ -76,20 +75,14 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
             scenario.base_url = global_base_url
 
         for step in scenario.steps:
-            # Resolve request timeout.
             if step.request.timeout is None:
                 step.request.timeout = global_timeout
 
-            # Merge global headers with step headers.
-            #
-            # Global headers provide defaults.
-            # Step-specific headers take precedence.
             step.request.headers = {
                 **global_headers,
                 **step.request.headers,
             }
 
-            # Compile response schema ahead of execution.
             if step.expect.schema_data is None:
                 continue
 
@@ -121,7 +114,7 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
                         f"'{step.expect.schema_data}': {err}"
                     ) from err
 
-            if raw_schema is None:
+            if raw_schema is None:  # pragma: no cover
                 raise ConfigCompilerError(
                     f"Invalid schema configuration in scenario "
                     f"'{scenario.name}', step '{step.name}'."
