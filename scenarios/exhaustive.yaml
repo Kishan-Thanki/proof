@@ -1,0 +1,175 @@
+version: "1.0"
+
+global:
+  base_url: "https://jsonplaceholder.typicode.com"
+  timeout_seconds: 8.0
+  headers:
+    User-Agent: "Proof-Synthetic-Daemon/0.2.0"
+    Accept: "application/json"
+    X-Synthetic-Probe: "enabled"
+
+scenarios:
+  - name: "1. End-to-End Dynamic CRUD & State Lifecycle Workflow"
+    # SCENARIO-LEVEL OVERRIDE: Maps to ScenarioConfig.base_url
+    # This overrides the global base_url for just this scenario
+    base_url: "https://jsonplaceholder.typicode.com" 
+    interval_seconds: 30
+    steps:
+      - name: "Create Resource with Built-in Variables"
+        request:
+          method: "POST"
+          path: "/posts"
+          # REQUEST-LEVEL OVERRIDE: Maps to RequestConfig.headers
+          headers:
+            Content-Type: "application/json"
+            X-Step-Specific-Header: "true"
+          # NEW: Maps to RequestConfig.params (URL query parameters)
+          # This translates to: /posts?utm_source=proof_daemon&debug_mode=true
+          params: 
+            utm_source: "proof_daemon"
+            debug_mode: true
+          # Maps to RequestConfig.json_payload (alias: json)
+          json:
+            title: "Synthetic Test - ${$uuid}"
+            body: "Automated probe executed at epoch timestamp ${$timestamp}"
+            userId: 1
+          # NEW: Maps to RequestConfig.timeout 
+          # Overrides the global timeout_seconds of 8.0 for this specific step
+          timeout: 5.0 
+        expect:
+          status: 201
+          # Maps to ExpectConfig.max_latency_ms
+          max_latency_ms: 3000
+          # Maps to ExpectConfig.headers
+          headers:
+            Content-Type: "application/json; charset=utf-8"
+          # Maps to ExpectConfig.schema_data (alias: schema)
+          schema:
+            type: "object"
+            required:
+              - id
+              - title
+              - body
+              - userId
+            properties:
+              id:
+                type: "integer"
+              title:
+                type: "string"
+              body:
+                type: "string"
+              userId:
+                type: "integer"
+        # Maps to StepConfig.extract
+        extract:
+          created_post_id: "$.id"
+          created_title: "$.title"
+
+      - name: "Fetch Dependent Collection Using Path Param"
+        request:
+          method: "GET"
+          path: "/posts/1/comments"
+        expect:
+          status: 200
+          max_latency_ms: 2000
+          schema:
+            type: "array"
+            minItems: 1
+            items:
+              type: "object"
+              required:
+                - postId
+                - id
+                - name
+                - email
+                - body
+              properties:
+                email:
+                  type: "string"
+        extract:
+          extracted_email: "$[0].email"
+
+      - name: "Full Resource Mutation (PUT) with Extracted Variables"
+        request:
+          method: "PUT"
+          path: "/posts/1"
+          headers:
+            Content-Type: "application/json"
+          json:
+            id: 1
+            title: "Updated: ${created_title}"
+            body: "Associated author email verified: ${extracted_email}"
+            userId: 1
+        expect:
+          status: 200
+          max_latency_ms: 2500
+          schema:
+            type: "object"
+            required:
+              - id
+              - title
+              - body
+            properties:
+              title:
+                type: "string"
+
+      - name: "Teardown Resource (DELETE)"
+        request:
+          method: "DELETE"
+          path: "/posts/1"
+        expect:
+          status: 200
+          max_latency_ms: 2000
+
+  - name: "2. Strict Schema Contract & Header Verification"
+    interval_seconds: 45
+    steps:
+      - name: "Validate User Entity Schema Integrity"
+        request:
+          method: "GET"
+          path: "/users/1"
+        expect:
+          status: 200
+          max_latency_ms: 1500
+          headers:
+            Content-Type: "application/json; charset=utf-8"
+          schema:
+            type: "object"
+            required:
+              - id
+              - name
+              - username
+              - email
+              - address
+              - company
+            properties:
+              id:
+                type: "integer"
+              name:
+                type: "string"
+              email:
+                type: "string"
+              address:
+                type: "object"
+                required:
+                  - street
+                  - city
+                  - zipcode
+                properties:
+                  street:
+                    type: "string"
+                  city:
+                    type: "string"
+                  zipcode:
+                    type: "string"
+
+  - name: "3. Negative Testing & Boundary Probing"
+    interval_seconds: 60
+    steps:
+      - name: "Verify Non-Existent Endpoint 404 Behavior"
+        request:
+          method: "GET"
+          path: "/posts/999999"
+        expect:
+          status: 404
+          max_latency_ms: 1500

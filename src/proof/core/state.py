@@ -16,11 +16,25 @@ class Status(Enum):
 
 @dataclass
 class ScenarioState:
-    """Tracks the historical state of a single scenario."""
+    """Tracks the current state of a single scenario."""
 
     status: Status = Status.UNKNOWN
     fail_count: int = 0
     pass_count: int = 0
+
+
+@dataclass(frozen=True)
+class StateTransition:
+    """Describes a scenario health-state transition."""
+
+    scenario_name: str
+    old_status: Status
+    new_status: Status
+
+    @property
+    def changed(self) -> bool:
+        """Return whether the scenario changed health state."""
+        return self.old_status != self.new_status
 
 
 class StateManager:
@@ -29,10 +43,12 @@ class StateManager:
     def __init__(self) -> None:
         self.states: dict[str, ScenarioState] = {}
 
-    def update_and_check_transition(
-        self, scenario_name: str, passed: bool
-    ) -> tuple[Status, Status]:
-        """Update scenario state and return (old_status, new_status)."""
+    def update(
+        self,
+        scenario_name: str,
+        passed: bool,
+    ) -> StateTransition:
+        """Update scenario state and return the resulting transition."""
         if scenario_name not in self.states:
             self.states[scenario_name] = ScenarioState()
 
@@ -40,12 +56,26 @@ class StateManager:
         old_status = state.status
 
         if passed:
+            state.status = Status.HEALTHY
             state.pass_count += 1
             state.fail_count = 0
-            state.status = Status.HEALTHY
         else:
+            state.status = Status.FAILING
             state.fail_count += 1
             state.pass_count = 0
-            state.status = Status.FAILING
 
-        return old_status, state.status
+        return StateTransition(
+            scenario_name=scenario_name,
+            old_status=old_status,
+            new_status=state.status,
+        )
+
+    def update_and_check_transition(
+        self,
+        scenario_name: str,
+        passed: bool,
+    ) -> tuple[Status, Status]:
+        """Update scenario state and return the old and new statuses."""
+        transition = self.update(scenario_name, passed)
+
+        return transition.old_status, transition.new_status
