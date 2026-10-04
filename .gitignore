@@ -79,3 +79,6 @@ __pypackages__/
 
 # PyPI credentials
 .pypirc
+
+
+FUTURE.md
