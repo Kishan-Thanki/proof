@@ -186,13 +186,16 @@ class ScenarioRunner:
                 error=str(err),
             )
 
-    async def run(self) -> ScenarioResult:
+    async def run(self, client: httpx.AsyncClient) -> ScenarioResult:
         """Execute all scenario steps sequentially.
 
         All steps share the same ExecutionContext, allowing values extracted
         from earlier responses to be used by later requests.
 
         Execution stops at the first failed step.
+
+        Args:
+            client: Shared asynchronous HTTP client for connection pooling.
 
         Returns:
             ScenarioResult containing the aggregate scenario outcome,
@@ -203,14 +206,15 @@ class ScenarioRunner:
 
         total_start = perf_counter()
 
-        async with httpx.AsyncClient() as client:
-            for step in self.scenario.steps:
-                result = await self.execute_step(step, client)
-                step_results.append(result)
+        client.cookies.clear()
 
-                if not result.passed:
-                    scenario_passed = False
-                    break
+        for step in self.scenario.steps:
+            result = await self.execute_step(step, client)
+            step_results.append(result)
+
+            if not result.passed:
+                scenario_passed = False
+                break
 
         total_latency_ms = (perf_counter() - total_start) * 1000
 

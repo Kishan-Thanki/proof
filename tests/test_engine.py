@@ -13,6 +13,7 @@ from proof.core.config import (
     ScenarioConfig,
     StepConfig,
 )
+from proof.core.context import ExecutionContext
 from proof.core.engine import ScenarioRunner
 
 
@@ -210,101 +211,31 @@ async def test_header_mismatch_fails_step() -> None:
 
 
 @pytest.mark.asyncio
-async def test_json_schema_validation_success() -> None:
-    """Verifies a valid response passes when a compiled schema is configured."""
+async def test_compiled_json_schema_validation() -> None:
+    """Verifies that compiled_schema callable is executed and reported on failure."""
+
+    def mock_compiled_schema(data: Any) -> None:
+        if not isinstance(data.get("id"), int):
+            raise ValueError("Field 'id' must be an integer")
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": 1,
-                "name": "Alice",
-            },
-        )
+        return httpx.Response(200, json={"id": "not-an-int"})
 
     step = StepConfig(
         name="Schema Check",
-        request=RequestConfig(
-            method="GET",
-            path="/user",
-            timeout=5.0,
-        ),
-        expect=ExpectConfig(
-            status=200,
-            schema={
-                "type": "object",
-                "required": ["id", "name"],
-                "properties": {
-                    "id": {"type": "integer"},
-                    "name": {"type": "string"},
-                },
-            },
-        ),
+        request=RequestConfig(method="GET", path="/user", timeout=5.0),
+        expect=ExpectConfig(status=200, compiled_schema=mock_compiled_schema),
     )
 
     runner = build_runner([step])
 
-    # The engine test deliberately does not assign to
-    # ExpectConfig.compiled_schema. Schema compilation belongs
-    # to the configuration compiler and is already tested there.
-    #
-    # If execute_step sees schema_data but compiled_schema is None,
-    # the engine should simply not perform schema validation here.
-    async with httpx.AsyncClient(
-        transport=make_transport(handler),
-    ) as client:
+    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
         result = await runner.execute_step(step, client)
 
-    assert result.passed is True
+    assert result.passed is False
     assert result.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_json_schema_validation_failure() -> None:
-    """Verifies invalid response data fails schema validation."""
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "not-an-integer",
-            },
-        )
-
-    step = StepConfig(
-        name="Invalid Schema",
-        request=RequestConfig(
-            method="GET",
-            path="/user",
-            timeout=5.0,
-        ),
-        expect=ExpectConfig(
-            status=200,
-            schema={
-                "type": "object",
-                "required": ["id"],
-                "properties": {
-                    "id": {"type": "integer"},
-                },
-            },
-        ),
-    )
-
-    runner = build_runner([step])
-
-    async with httpx.AsyncClient(
-        transport=make_transport(handler),
-    ) as client:
-        result = await runner.execute_step(step, client)
-
-    # execute_step alone receives an uncompiled ExpectConfig.
-    # Schema compilation is performed by the configuration compiler.
-    #
-    # Therefore this test verifies that the HTTP request itself
-    # succeeds. Actual schema failure is covered by compiler-level
-    # tests and should be tested through load_and_compile_config.
-    assert result.passed is True
-    assert result.status_code == 200
+    assert result.error is not None
+    assert "Schema assertion failed" in result.error
 
 
 @pytest.mark.asyncio
@@ -368,7 +299,6 @@ async def test_multi_step_context_extraction_and_interpolation() -> None:
         if request.url.path == "/posts":
             body = request.content.decode()
 
-            # HTTPX serializes JSON without spaces.
             assert '"userId":1' in body
             assert "user@example.com" in body
 
@@ -438,29 +368,154 @@ async def test_multi_step_context_extraction_and_interpolation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_step_reports_failed_response() -> None:
-    """Verifies an individual failed step returns a failed result."""
+async def test_scenario_runner_clears_cookies_and_executes_all_steps() -> None:
+    """Verifies runner.run() clears cookies from the client and halts on failure."""
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
+        if request.url.path == "/step1":
+            return httpx.Response(200, json={"status": "ok"})
+        if request.url.path == "/step2":
+            return httpx.Response(500, json={"error": "server error"})
+        return httpx.Response(200)
 
-    step = StepConfig(
-        name="Failing Step",
-        request=RequestConfig(
-            method="GET",
-            path="/first",
-            timeout=5.0,
-        ),
+    step1 = StepConfig(
+        name="Step 1",
+        request=RequestConfig(method="GET", path="/step1", timeout=5.0),
+        expect=ExpectConfig(status=200),
+    )
+    step2 = StepConfig(
+        name="Step 2",
+        request=RequestConfig(method="GET", path="/step2", timeout=5.0),
+        expect=ExpectConfig(status=200),
+    )
+    step3 = StepConfig(
+        name="Step 3",
+        request=RequestConfig(method="GET", path="/step3", timeout=5.0),
         expect=ExpectConfig(status=200),
     )
 
-    runner = build_runner([step])
+    runner = build_runner([step1, step2, step3])
 
-    async with httpx.AsyncClient(
-        transport=make_transport(handler),
-    ) as client:
+    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+        client.cookies.set("session_token", "stale_cookie_data")
+
+        scenario_result = await runner.run(client)
+
+        # Cookie should be cleared by runner.run()
+        assert len(client.cookies) == 0
+
+    assert scenario_result.passed is False
+    assert len(scenario_result.step_results) == 2  # Halts after step 2 fails
+    assert scenario_result.step_results[0].passed is True
+    assert scenario_result.step_results[1].passed is False
+
+
+# =======================================================================
+# NEW TESTS ADDED FOR 100% COVERAGE
+# =======================================================================
+
+
+@pytest.mark.asyncio
+async def test_missing_base_url_fails_step() -> None:
+    """Verifies missing base URL raises an error during execution."""
+    step = StepConfig(
+        name="No Base URL",
+        request=RequestConfig(method="GET", path="/", timeout=5.0),
+        expect=ExpectConfig(status=200),
+    )
+    scenario = ScenarioConfig(
+        name="Missing Base",
+        base_url="",  # Falsy base_url triggers the validation logic
+        steps=[step],
+    )
+    runner = ScenarioRunner(scenario)
+
+    async with httpx.AsyncClient() as client:
         result = await runner.execute_step(step, client)
 
     assert result.passed is False
-    assert result.status_code == 500
     assert result.error is not None
+    assert "missing a valid base_url" in result.error
+
+
+@pytest.mark.asyncio
+async def test_missing_timeout_fails_step() -> None:
+    """Verifies a step without a resolved timeout fails."""
+    step = StepConfig(
+        name="No Timeout",
+        request=RequestConfig(method="GET", path="/", timeout=None),
+        expect=ExpectConfig(status=200),
+    )
+    runner = build_runner([step])
+
+    async with httpx.AsyncClient() as client:
+        result = await runner.execute_step(step, client)
+
+    assert result.passed is False
+    assert result.error is not None
+    assert "missing a resolved request timeout" in result.error
+
+
+@pytest.mark.asyncio
+async def test_latency_limit_exceeded_fails_step() -> None:
+    """Verifies step fails if max_latency_ms is exceeded."""
+    import asyncio
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.01)  # 10ms sleep guarantees > 1ms latency
+        return httpx.Response(200, json={"status": "ok"})
+
+    step = StepConfig(
+        name="Latency Check",
+        request=RequestConfig(method="GET", path="/fast", timeout=5.0),
+        expect=ExpectConfig(
+            status=200,
+            max_latency_ms=1.0,  # 1ms ceiling versus 10ms actual
+        ),
+    )
+    runner = build_runner([step])
+
+    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+        result = await runner.execute_step(step, client)
+
+    assert result.passed is False
+    assert result.error is not None
+    assert "Latency limit exceeded" in result.error
+
+
+@pytest.mark.asyncio
+async def test_scenario_runner_custom_context_and_successful_run() -> None:
+    """Verifies passing a custom context and all steps passing in run()."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200)
+
+    step1 = StepConfig(
+        name="Step 1",
+        request=RequestConfig(method="GET", path="/1", timeout=5.0),
+        expect=ExpectConfig(status=200),
+    )
+    step2 = StepConfig(
+        name="Step 2",
+        request=RequestConfig(method="GET", path="/2", timeout=5.0),
+        expect=ExpectConfig(status=200),
+    )
+
+    scenario = ScenarioConfig(
+        name="Successful Run",
+        base_url="https://test.example.com",
+        steps=[step1, step2],
+    )
+
+    # Validates `context is not None` branch in `__init__`
+    context = ExecutionContext()
+    runner = ScenarioRunner(scenario, context=context)
+
+    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+        scenario_result = await runner.run(client)
+
+    # Validates `run()` exiting the loop normally without triggering the `break` branch
+    assert scenario_result.passed is True
+    assert len(scenario_result.step_results) == 2
+    assert scenario_result.step_results[0].passed is True
+    assert scenario_result.step_results[1].passed is True
