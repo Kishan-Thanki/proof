@@ -34,6 +34,7 @@ dev = [
     "ruff>=0.8.0",
     "pyright>=1.1.390",
     "pre-commit>=4.0.0",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.ruff]
@@ -65,3 +66,16 @@ typeCheckingMode = "basic"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+addopts = "--cov=proof --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/proof"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

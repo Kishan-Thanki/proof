@@ -8,9 +8,9 @@ expectations, schema validations, and extraction rules.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
 class GlobalConfig(BaseModel):
@@ -64,6 +64,8 @@ class RequestConfig(BaseModel):
 
 class ExpectConfig(BaseModel):
     """Defines assertion criteria evaluated against the HTTP response."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     status: int = Field(
         ...,
@@ -135,9 +137,9 @@ class ScenarioConfig(BaseModel):
 class ProofConfig(BaseModel):
     """Root configuration model representing a parsed Proof YAML file."""
 
-    version: str = Field(
-        default="1.0",
-        description="Configuration schema version.",
+    version: Literal["1.0"] = Field(
+        ...,
+        description="Configuration schema version. Currently only '1.0' is supported.",
     )
     global_config: GlobalConfig | None = Field(
         default=None,
