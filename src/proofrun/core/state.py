@@ -70,12 +70,12 @@ class StateManager:
             new_status=state.status,
         )
 
-    def update_and_check_transition(
-        self,
-        scenario_name: str,
-        passed: bool,
-    ) -> tuple[Status, Status]:
-        """Update scenario state and return the old and new statuses."""
-        transition = self.update(scenario_name, passed)
+    def sync(self, active_scenario_names: set[str]) -> None:
+        """Remove state for scenarios that no longer exist in the configuration.
 
-        return transition.old_status, transition.new_status
+        Call this periodically or after a configuration hot-reload to prevent
+        memory leaks from deleted scenarios.
+        """
+        stale_keys = set(self.states.keys()) - active_scenario_names
+        for key in stale_keys:
+            del self.states[key]

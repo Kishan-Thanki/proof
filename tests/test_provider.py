@@ -1,10 +1,12 @@
-"""Unit tests for the Proof configuration manager."""
+"""Unit tests for the Proofrun configuration manager."""
+
+from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
-from proof.core.compiler import ConfigCompilerError
-from proof.core.config_manager import ConfigManager
+from proofrun.core.compiler import ConfigCompilerError
+from proofrun.core.provider import ConfigProvider
 
 VALID_CONFIG = """
 version: "1.0"
@@ -27,10 +29,10 @@ scenarios:
 
 def test_config_manager_loads_configuration(tmp_path: Path) -> None:
     """Verifies the configuration is loaded successfully."""
-    config_file = tmp_path / "proof.yaml"
+    config_file = tmp_path / "proofrun.yaml"
     config_file.write_text(VALID_CONFIG, encoding="utf-8")
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     config, error = manager.load()
 
@@ -43,10 +45,10 @@ def test_config_manager_returns_cached_configuration(
     tmp_path: Path,
 ) -> None:
     """Verifies repeated loads return the cached configuration."""
-    config_file = tmp_path / "proof.yaml"
+    config_file = tmp_path / "proofrun.yaml"
     config_file.write_text(VALID_CONFIG, encoding="utf-8")
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     first_config, first_error = manager.load()
     second_config, second_error = manager.load()
@@ -60,10 +62,10 @@ def test_config_manager_reloads_modified_configuration(
     tmp_path: Path,
 ) -> None:
     """Verifies a modified configuration is recompiled."""
-    config_file = tmp_path / "proof.yaml"
+    config_file = tmp_path / "proofrun.yaml"
     config_file.write_text(VALID_CONFIG, encoding="utf-8")
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     first_config, error = manager.load()
 
@@ -99,10 +101,10 @@ def test_config_manager_retains_last_known_good_configuration(
     tmp_path: Path,
 ) -> None:
     """Verifies an invalid update retains the previous valid configuration."""
-    config_file = tmp_path / "proof.yaml"
+    config_file = tmp_path / "proofrun.yaml"
     config_file.write_text(VALID_CONFIG, encoding="utf-8")
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     config, error = manager.load()
 
@@ -120,11 +122,12 @@ scenarios:
 """
     config_file.write_text(invalid_config, encoding="utf-8")
 
-    modified_stat = type(config_file.stat())(
-        list(config_file.stat()[:8])
+    stat_result = config_file.stat()
+    modified_stat = type(stat_result)(
+        list(stat_result[:8])
         + [
-            config_file.stat().st_atime_ns,
-            config_file.stat().st_mtime_ns + 1,
+            stat_result.st_atime_ns,
+            stat_result.st_mtime_ns + 1,
         ]
     )
 
@@ -144,7 +147,7 @@ def test_config_manager_handles_missing_file(tmp_path: Path) -> None:
     """Verifies a missing configuration file returns an error."""
     config_file = tmp_path / "missing.yaml"
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     config, error = manager.load()
 
@@ -158,10 +161,10 @@ def test_config_manager_handles_file_access_error(
     tmp_path: Path,
 ) -> None:
     """Verifies filesystem errors preserve the cached configuration."""
-    config_file = tmp_path / "proof.yaml"
+    config_file = tmp_path / "proofrun.yaml"
     config_file.write_text(VALID_CONFIG, encoding="utf-8")
 
-    manager = ConfigManager(config_file)
+    manager = ConfigProvider(config_file)
 
     config, error = manager.load()
 

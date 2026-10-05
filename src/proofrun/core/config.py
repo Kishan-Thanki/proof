@@ -1,4 +1,4 @@
-"""Declarative configuration models for Proof synthetic monitoring scenarios.
+"""Declarative configuration models for Proofrun synthetic monitoring scenarios.
 
 This module defines the Pydantic schemas used to parse, validate, and structure
 YAML monitoring scenarios, including global settings, request parameters,
@@ -10,13 +10,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, PrivateAttr
 
 
 class GlobalConfig(BaseModel):
     """Global default settings applied across all scenarios and steps."""
 
-    base_url: HttpUrl | str | None = Field(
+    base_url: HttpUrl | None = Field(
         default=None,
         description="Default root URL target for scenarios.",
     )
@@ -34,9 +34,9 @@ class GlobalConfig(BaseModel):
 class RequestConfig(BaseModel):
     """Defines the parameters for an outgoing HTTP request."""
 
-    method: str = Field(
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] = Field(
         ...,
-        description="HTTP method (e.g., GET, POST, PUT, DELETE).",
+        description="HTTP method.",
     )
     path: str = Field(
         ...,
@@ -67,9 +67,9 @@ class ExpectConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    status: int = Field(
+    status: int | list[int] = Field(
         ...,
-        description="Expected HTTP status code.",
+        description="Expected HTTP status code(s).",
     )
     headers: dict[str, str] = Field(
         default_factory=dict,
@@ -85,10 +85,8 @@ class ExpectConfig(BaseModel):
         alias="schema",
         description="Path to a JSON schema file or inline schema dictionary.",
     )
-    compiled_schema: Callable[[Any], Any] | None = Field(
-        default=None,
-        description="AOT-compiled fastjsonschema validation function.",
-    )
+
+    _compiled_schema: Callable[[Any], Any] | None = PrivateAttr(default=None)
 
 
 class StepConfig(BaseModel):
@@ -119,7 +117,7 @@ class ScenarioConfig(BaseModel):
         ...,
         description="Human-readable scenario suite name.",
     )
-    base_url: HttpUrl | str | None = Field(
+    base_url: HttpUrl | None = Field(
         default=None,
         description="Root URL target for all steps in this scenario.",
     )
@@ -134,8 +132,8 @@ class ScenarioConfig(BaseModel):
     )
 
 
-class ProofConfig(BaseModel):
-    """Root configuration model representing a parsed Proof YAML file."""
+class ProofrunConfig(BaseModel):
+    """Root configuration model representing a parsed Proofrun YAML file."""
 
     version: Literal["1.0"] = Field(
         ...,

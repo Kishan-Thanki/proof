@@ -1,0 +1,45 @@
+version: "1.0"
+
+global:
+  base_url: "http://127.0.0.1:8099"
+  timeout_seconds: 5
+
+scenarios:
+  - name: "Login and fetch orders"
+    interval_seconds: 60
+    steps:
+      - name: "Log in"
+        request:
+          method: POST
+          path: /login
+          json:
+            email: "demo@example.com"
+            password: "demo-password"
+        expect:
+          status: 200
+          max_latency_ms: 1000
+        extract:
+          token: "$.access_token"
+
+      - name: "Fetch profile"
+        request:
+          method: GET
+          path: /me
+          headers:
+            Authorization: "Bearer ${token}"
+        expect:
+          status: 200
+        extract:
+          user_id: "$.id"
+
+      - name: "Fetch orders"
+        request:
+          method: GET
+          path: "/users/${user_id}/orders"
+          headers:
+            Authorization: "Bearer ${token}"
+        expect:
+          status: 200
+          schema:
+            type: array
+            minItems: 1

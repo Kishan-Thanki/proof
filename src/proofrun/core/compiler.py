@@ -1,4 +1,4 @@
-"""AOT Schema Compiler for Proof scenario configurations.
+"""AOT Schema Compiler for Proofrun scenario configurations.
 
 This module loads YAML configuration, validates it using Pydantic, resolves
 global defaults, and pre-compiles JSON schemas into executable validators.
@@ -13,21 +13,21 @@ import fastjsonschema
 import yaml
 from pydantic import ValidationError
 
-from proof.core.config import GlobalConfig, ProofConfig
+from proofrun.core.config import GlobalConfig, ProofrunConfig
 
 
 class ConfigCompilerError(Exception):
     """Raised when configuration loading or compilation fails."""
 
 
-def load_and_compile_config(config_path: str | Path) -> ProofConfig:
-    """Load, validate, resolve, and compile a Proof configuration.
+def load_and_compile_config(config_path: str | Path) -> ProofrunConfig:
+    """Load, validate, resolve, and compile a Proofrun configuration.
 
     Args:
         config_path: Path to the YAML configuration file.
 
     Returns:
-        A validated and executable ProofConfig.
+        A validated and executable ProofrunConfig.
 
     Raises:
         ConfigCompilerError: If loading, validation, inheritance, or schema
@@ -54,13 +54,13 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
         )
 
     try:
-        config = ProofConfig.model_validate(raw_data)
+        config = ProofrunConfig.model_validate(raw_data)
     except ValidationError as err:
         raise ConfigCompilerError(f"Config validation failed:\n{err}") from err
 
     global_config = config.global_config or GlobalConfig()
 
-    global_base_url = str(global_config.base_url) if global_config.base_url else None
+    global_base_url = global_config.base_url
     global_timeout = global_config.timeout_seconds
     global_headers = global_config.headers
 
@@ -122,7 +122,7 @@ def load_and_compile_config(config_path: str | Path) -> ProofConfig:
 
             try:
                 compiled = fastjsonschema.compile(raw_schema)
-                step.expect.compiled_schema = cast(
+                step.expect._compiled_schema = cast(
                     Callable[[Any], Any],
                     compiled,
                 )

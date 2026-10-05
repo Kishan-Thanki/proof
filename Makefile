@@ -1,5 +1,5 @@
-.PHONY: install test coverage coverage-html lint format typecheck check \
-	run-example run-sample run-exhaustive build clean
+.PHONY: install test coverage coverage-html lint format format-check typecheck check \
+	run-profile run-auth run-chain run-crud build clean
 
 install:
 	uv sync --group dev
@@ -8,12 +8,12 @@ test:
 	uv run pytest -q
 
 coverage:
-	uv run pytest -q --cov=proof --cov-branch \
+	uv run pytest -q --cov=proofrun --cov-branch \
 		--cov-report=term-missing \
 		--cov-fail-under=100
 
 coverage-html:
-	uv run pytest -q --cov=proof --cov-branch \
+	uv run pytest -q --cov=proofrun --cov-branch \
 		--cov-report=html
 	@echo "Coverage report generated: htmlcov/index.html"
 
@@ -32,14 +32,17 @@ typecheck:
 
 check: lint format-check typecheck coverage
 
-run-example:
-	uv run proof run scenarios/example.yaml --once
+run-profile:
+	uv run proofrun scenarios/profile.yaml --once
 
-run-sample:
-	uv run proof run scenarios/sample.yaml --once
+run-auth:
+	uv run proofrun scenarios/auth.yaml --once
 
-run-exhaustive:
-	uv run proof run scenarios/exhaustive.yaml --once
+run-chain:
+	uv run proofrun scenarios/chain.yaml --once
+
+run-crud:
+	uv run proofrun scenarios/crud.yaml --once
 
 build:
 	uv build
@@ -54,4 +57,3 @@ clean:
 		htmlcov/ \
 		__pycache__/ \
 		*.egg-info/
-

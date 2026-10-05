@@ -1,26 +1,26 @@
-"""Configuration loading and caching for Proof."""
+"""Configuration loading and caching for Proofrun."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from proof.core.compiler import (
+from proofrun.core.compiler import (
     ConfigCompilerError,
     load_and_compile_config,
 )
-from proof.core.config import ProofConfig
+from proofrun.core.config import ProofrunConfig
 
 
 @dataclass
-class ConfigManager:
-    """Manage a cached, compiled Proof configuration."""
+class ConfigProvider:
+    """Manage a cached, compiled Proofrun configuration."""
 
     config_path: Path
-    _config: ProofConfig | None = None
+    _config: ProofrunConfig | None = None
     _last_modified_ns: int | None = None
 
-    def load(self) -> tuple[ProofConfig | None, ConfigCompilerError | None]:
+    def load(self) -> tuple[ProofrunConfig | None, ConfigCompilerError | None]:
         """Load the configuration when needed.
 
         The configuration is compiled on the first call and whenever the

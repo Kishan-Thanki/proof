@@ -1,12 +1,14 @@
 """Verification suite for ExecutionContext."""
 
+from __future__ import annotations
+
 import re
 import time
 import uuid
 
 import pytest
 
-from proof.core.context import ContextError, ExecutionContext
+from proofrun.core.context import ContextError, ExecutionContext
 
 
 def test_initial_vars_get_and_set() -> None:
@@ -89,7 +91,7 @@ def test_extraction_and_interpolation() -> None:
         "Bearer bearer_token_xyz123"
     )
     assert processed_payload["json"]["account_id"] == 101
-    assert processed_payload["json"]["contact_email"] == ("janedoe@example.com")
+    assert processed_payload["json"]["contact_email"] == "janedoe@example.com"
 
 
 def test_dynamic_variables() -> None:
@@ -218,7 +220,10 @@ def test_error_handling() -> None:
 
     with pytest.raises(
         ContextError,
-        match=re.escape("Path '$.data.missing_key' did not match any value"),
+        match=re.escape(
+            "JSONPath extraction failed: Path '$.data.missing_key' "
+            "did not match any value in response."
+        ),
     ):
         ctx.extract_variables(
             {"status": "ok"},
@@ -236,11 +241,13 @@ def test_error_handling() -> None:
 
 
 def test_unknown_dynamic_variable_raises_error() -> None:
-    """Verifies unknown built-in dynamic variables raise a
-    missing context variable error."""
+    """Verifies unknown built-in dynamic variables raise missing error."""
     ctx = ExecutionContext()
 
-    with pytest.raises(ContextError, match="Missing required context variable"):
+    with pytest.raises(
+        ContextError,
+        match="Missing required context variable",
+    ):
         ctx.interpolate_string("${$unknown_generator}")
 
 
@@ -248,5 +255,8 @@ def test_unknown_dynamic_variable_in_string_raises_error() -> None:
     """Verifies unknown dynamic variables inside composite strings raise errors."""
     ctx = ExecutionContext()
 
-    with pytest.raises(ContextError, match="Missing required context variable"):
+    with pytest.raises(
+        ContextError,
+        match="Missing required context variable",
+    ):
         ctx.interpolate_string("prefix_${$invalid}_suffix")

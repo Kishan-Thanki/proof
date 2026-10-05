@@ -1,4 +1,4 @@
-"""Unit tests for the Proof asynchronous execution engine."""
+"""Unit tests for the Proofrun asynchronous execution engine."""
 
 from __future__ import annotations
 
@@ -6,22 +6,23 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import HttpUrl
 
-from proof.core.config import (
+from proofrun.core.config import (
     ExpectConfig,
     RequestConfig,
     ScenarioConfig,
     StepConfig,
 )
-from proof.core.context import ExecutionContext
-from proof.core.engine import ScenarioRunner
+from proofrun.core.context import ExecutionContext
+from proofrun.core.engine import ScenarioRunner
 
 
 def build_runner(steps: list[StepConfig]) -> ScenarioRunner:
     """Build a scenario runner targeting the mock HTTP server."""
     scenario = ScenarioConfig(
         name="Engine Test Scenario",
-        base_url="https://test.example.com",
+        base_url=HttpUrl("https://test.example.com"),
         steps=steps,
     )
 
@@ -102,7 +103,7 @@ async def test_status_code_mismatch_reports_response_status() -> None:
     assert result.status_code == 404
     assert result.error is not None
     assert "Status code mismatch" in result.error
-    assert "expected 200, got 404" in result.error
+    assert "expected one of [200], got 404" in result.error
 
 
 @pytest.mark.asyncio
@@ -221,15 +222,20 @@ async def test_compiled_json_schema_validation() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"id": "not-an-int"})
 
+    expect_cfg = ExpectConfig(status=200)
+    expect_cfg._compiled_schema = mock_compiled_schema
+
     step = StepConfig(
         name="Schema Check",
         request=RequestConfig(method="GET", path="/user", timeout=5.0),
-        expect=ExpectConfig(status=200, compiled_schema=mock_compiled_schema),
+        expect=expect_cfg,
     )
 
     runner = build_runner([step])
 
-    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=make_transport(handler),
+    ) as client:
         result = await runner.execute_step(step, client)
 
     assert result.passed is False
@@ -338,18 +344,20 @@ async def test_multi_step_context_extraction_and_interpolation() -> None:
         },
     )
 
+    req3 = RequestConfig(
+        method="POST",
+        path="/posts",
+        timeout=5.0,
+    )
+    req3.json_payload = {
+        "title": "Synthetic ${post_title}",
+        "body": "Author email: ${user_email}",
+        "userId": "${target_user_id}",
+    }
+
     step3 = StepConfig(
         name="Create Post",
-        request=RequestConfig(
-            method="POST",
-            path="/posts",
-            timeout=5.0,
-            json={
-                "title": "Synthetic ${post_title}",
-                "body": "Author email: ${user_email}",
-                "userId": "${target_user_id}",
-            },
-        ),
+        request=req3,
         expect=ExpectConfig(status=201),
     )
 
@@ -369,7 +377,7 @@ async def test_multi_step_context_extraction_and_interpolation() -> None:
 
 @pytest.mark.asyncio
 async def test_scenario_runner_clears_cookies_and_executes_all_steps() -> None:
-    """Verifies runner.run() clears cookies from the client and halts on failure."""
+    """Verifies runner.run() clears cookies from client and halts on failure."""
 
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/step1":
@@ -396,23 +404,19 @@ async def test_scenario_runner_clears_cookies_and_executes_all_steps() -> None:
 
     runner = build_runner([step1, step2, step3])
 
-    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=make_transport(handler),
+    ) as client:
         client.cookies.set("session_token", "stale_cookie_data")
 
         scenario_result = await runner.run(client)
 
-        # Cookie should be cleared by runner.run()
         assert len(client.cookies) == 0
 
     assert scenario_result.passed is False
-    assert len(scenario_result.step_results) == 2  # Halts after step 2 fails
+    assert len(scenario_result.step_results) == 2
     assert scenario_result.step_results[0].passed is True
     assert scenario_result.step_results[1].passed is False
-
-
-# =======================================================================
-# NEW TESTS ADDED FOR 100% COVERAGE
-# =======================================================================
 
 
 @pytest.mark.asyncio
@@ -425,7 +429,7 @@ async def test_missing_base_url_fails_step() -> None:
     )
     scenario = ScenarioConfig(
         name="Missing Base",
-        base_url="",  # Falsy base_url triggers the validation logic
+        base_url=None,
         steps=[step],
     )
     runner = ScenarioRunner(scenario)
@@ -462,7 +466,7 @@ async def test_latency_limit_exceeded_fails_step() -> None:
     import asyncio
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(0.01)  # 10ms sleep guarantees > 1ms latency
+        await asyncio.sleep(0.01)
         return httpx.Response(200, json={"status": "ok"})
 
     step = StepConfig(
@@ -470,12 +474,14 @@ async def test_latency_limit_exceeded_fails_step() -> None:
         request=RequestConfig(method="GET", path="/fast", timeout=5.0),
         expect=ExpectConfig(
             status=200,
-            max_latency_ms=1.0,  # 1ms ceiling versus 10ms actual
+            max_latency_ms=1.0,
         ),
     )
     runner = build_runner([step])
 
-    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=make_transport(handler),
+    ) as client:
         result = await runner.execute_step(step, client)
 
     assert result.passed is False
@@ -503,18 +509,18 @@ async def test_scenario_runner_custom_context_and_successful_run() -> None:
 
     scenario = ScenarioConfig(
         name="Successful Run",
-        base_url="https://test.example.com",
+        base_url=HttpUrl("https://test.example.com"),
         steps=[step1, step2],
     )
 
-    # Validates `context is not None` branch in `__init__`
     context = ExecutionContext()
     runner = ScenarioRunner(scenario, context=context)
 
-    async with httpx.AsyncClient(transport=make_transport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=make_transport(handler),
+    ) as client:
         scenario_result = await runner.run(client)
 
-    # Validates `run()` exiting the loop normally without triggering the `break` branch
     assert scenario_result.passed is True
     assert len(scenario_result.step_results) == 2
     assert scenario_result.step_results[0].passed is True

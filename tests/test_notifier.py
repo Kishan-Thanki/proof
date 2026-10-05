@@ -1,16 +1,18 @@
 """Unit tests for the webhook notification system."""
 
+from __future__ import annotations
+
 import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from proof.core.notifier import (
+from proofrun.core.notifier import (
     NotificationEvent,
     WebhookNotifier,
 )
-from proof.core.state import Status
+from proofrun.core.state import Status
 
 
 @pytest.mark.asyncio
@@ -36,7 +38,7 @@ async def test_webhook_alert_failure() -> None:
     )
 
     with patch(
-        "proof.core.notifier.console.print",
+        "proofrun.core.notifier.console.print",
     ) as mock_print:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
@@ -76,7 +78,7 @@ async def test_webhook_alert_recovery() -> None:
     )
 
     with patch(
-        "proof.core.notifier.console.print",
+        "proofrun.core.notifier.console.print",
     ) as mock_print:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
@@ -111,7 +113,7 @@ async def test_webhook_alert_http_error() -> None:
     )
 
     with patch(
-        "proof.core.notifier.console.print",
+        "proofrun.core.notifier.console.print",
     ) as mock_print:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
@@ -148,7 +150,7 @@ async def test_webhook_alert_network_exception() -> None:
     )
 
     with patch(
-        "proof.core.notifier.console.print",
+        "proofrun.core.notifier.console.print",
     ) as mock_print:
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(handler),

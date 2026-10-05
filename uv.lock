@@ -416,8 +416,8 @@ wheels = [
 ]
 
 [[package]]
-name = "proof"
-version = "0.1.0"
+name = "proofrun"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastjsonschema" },

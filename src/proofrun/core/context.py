@@ -1,4 +1,4 @@
-"""Execution context and dynamic variable interpolation module for Proof.
+"""Execution context and dynamic variable interpolation module for Proofrun.
 
 This module manages runtime state persistence across scenario steps, JSONPath
 variable extraction from API responses, nested payload interpolation, and
@@ -45,7 +45,11 @@ class ExecutionContext:
         return self.variables.get(key, default)
 
     def _get_dynamic_variable(self, var_name: str) -> Any | None:
-        """Resolve a built-in dynamic variable."""
+        """Resolve a built-in dynamic variable.
+
+        Note: These generate a new value every time they are called. Multiple
+        references to ${$uuid} in a single payload will yield different UUIDs.
+        """
         if var_name == "$uuid":
             return str(uuid.uuid4())
 
@@ -159,12 +163,21 @@ class ExecutionContext:
         return self.VAR_PATTERN.sub(replace_var, text)
 
     def interpolate_data(self, data: Any) -> Any:
-        """Recursively interpolate strings inside nested request data."""
+        """Recursively interpolate strings inside nested request data.
+
+        This will interpolate strings found in dictionary values,
+        dictionary keys, and list items.
+        """
         if isinstance(data, str):
             return self.interpolate_string(data)
 
         if isinstance(data, dict):
-            return {key: self.interpolate_data(value) for key, value in data.items()}
+            return {
+                (
+                    self.interpolate_string(key) if isinstance(key, str) else key
+                ): self.interpolate_data(value)
+                for key, value in data.items()
+            }
 
         if isinstance(data, list):
             return [self.interpolate_data(item) for item in data]

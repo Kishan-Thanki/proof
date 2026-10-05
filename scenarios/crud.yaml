@@ -4,46 +4,35 @@ global:
   base_url: "https://jsonplaceholder.typicode.com"
   timeout_seconds: 8.0
   headers:
-    User-Agent: "Proof-Synthetic-Daemon/0.1.0"
+    User-Agent: "Proofrun-Synthetic-Daemon/0.1.0"
     Accept: "application/json"
     X-Synthetic-Probe: "enabled"
 
 scenarios:
   - name: "1. End-to-End Dynamic CRUD & State Lifecycle Workflow"
-    # SCENARIO-LEVEL OVERRIDE: Maps to ScenarioConfig.base_url
-    # This overrides the global base_url for just this scenario
-    base_url: "https://jsonplaceholder.typicode.com" 
+    base_url: "https://jsonplaceholder.typicode.com"
     interval_seconds: 30
     steps:
       - name: "Create Resource with Built-in Variables"
         request:
           method: "POST"
           path: "/posts"
-          # REQUEST-LEVEL OVERRIDE: Maps to RequestConfig.headers
           headers:
             Content-Type: "application/json"
             X-Step-Specific-Header: "true"
-          # NEW: Maps to RequestConfig.params (URL query parameters)
-          # This translates to: /posts?utm_source=proof_daemon&debug_mode=true
-          params: 
+          params:
             utm_source: "proof_daemon"
             debug_mode: true
-          # Maps to RequestConfig.json_payload (alias: json)
           json:
             title: "Synthetic Test - ${$uuid}"
             body: "Automated probe executed at epoch timestamp ${$timestamp}"
             userId: 1
-          # NEW: Maps to RequestConfig.timeout 
-          # Overrides the global timeout_seconds of 8.0 for this specific step
-          timeout: 5.0 
+          timeout: 5.0
         expect:
           status: 201
-          # Maps to ExpectConfig.max_latency_ms
           max_latency_ms: 3000
-          # Maps to ExpectConfig.headers
           headers:
             Content-Type: "application/json; charset=utf-8"
-          # Maps to ExpectConfig.schema_data (alias: schema)
           schema:
             type: "object"
             required:
@@ -60,7 +49,6 @@ scenarios:
                 type: "string"
               userId:
                 type: "integer"
-        # Maps to StepConfig.extract
         extract:
           created_post_id: "$.id"
           created_title: "$.title"

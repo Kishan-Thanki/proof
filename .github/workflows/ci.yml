@@ -41,29 +41,25 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: make install
 
       - name: Check formatting
-        run: uv run ruff format --check .
+        run: make format-check
 
       - name: Lint
-        run: uv run ruff check .
+        run: make lint
 
       - name: Type check
-        run: uv run pyright
+        run: make typecheck
 
       - name: Run tests with coverage
-        run: >
-          uv run pytest -q
-          --cov=proof
-          --cov-branch
-          --cov-report=term-missing
+        run: make coverage
 
-      - name: Smoke test example scenario
-        run: uv run proof run scenarios/example.yaml
+      - name: Smoke test profile scenario
+        run: make run-profile
 
-      - name: Smoke test sample scenario
-        run: uv run proof run scenarios/sample.yaml
+      - name: Smoke test chain scenario
+        run: make run-chain
 
   build:
     name: Build Package
@@ -86,10 +82,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: make install
 
       - name: Build distributions
-        run: uv build
+        run: make build
 
       - name: Verify distributions
         run: |

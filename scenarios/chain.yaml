@@ -4,7 +4,7 @@ global:
   base_url: "https://jsonplaceholder.typicode.com"
   timeout_seconds: 10.0
   headers:
-    User-Agent: "Proof-Synthetic-Daemon/0.1.0"
+    User-Agent: "Proofrun-Synthetic-Daemon/0.1.0"
     Accept: "application/json"
 
 scenarios:

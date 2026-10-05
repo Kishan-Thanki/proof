@@ -1,4 +1,4 @@
-"""Exhaustive unit and integration tests for Proof configuration compiler."""
+"""Exhaustive unit and integration tests for Proofrun configuration compiler."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import fastjsonschema
 import pytest
 
-from proof.core.compiler import ConfigCompilerError, load_and_compile_config
+from proofrun.core.compiler import ConfigCompilerError, load_and_compile_config
 
 # ============================================================================
 # Integration & File Loading Tests
@@ -16,17 +16,16 @@ from proof.core.compiler import ConfigCompilerError, load_and_compile_config
 
 
 def test_load_and_compile_config_integration() -> None:
-    """Verifies end-to-end config compilation using the example scenario."""
+    """Verifies end-to-end config compilation using the profile scenario."""
     project_root = Path(__file__).parent.parent
-    scenario_path = project_root / "scenarios" / "example.yaml"
+    scenario_path = project_root / "scenarios" / "profile.yaml"
 
     config = load_and_compile_config(scenario_path)
 
     assert config.global_config is not None
-    assert (
-        str(config.global_config.base_url).rstrip("/")
-        == "https://jsonplaceholder.typicode.com"
-    )
+    assert config.global_config.base_url is not None
+    base_url_str = str(config.global_config.base_url).rstrip("/")
+    assert base_url_str == "https://jsonplaceholder.typicode.com"
     assert config.global_config.timeout_seconds == 5.0
 
     scenario = config.scenarios[0]
@@ -37,7 +36,7 @@ def test_load_and_compile_config_integration() -> None:
     assert step.name == "Fetch User #1"
     assert step.expect.max_latency_ms == 1000.0
 
-    schema_func = step.expect.compiled_schema
+    schema_func = step.expect._compiled_schema
 
     assert schema_func is not None
     assert callable(schema_func)
@@ -88,8 +87,7 @@ global:
 
 
 def test_load_and_compile_os_error_reading_file(tmp_path: Path) -> None:
-    """Verifies OSError during file reading
-    (e.g. passing a directory path) raises ConfigCompilerError."""
+    """Verifies OSError during file reading (e.g. passing a directory) raises error."""
     dir_path = tmp_path / "directory_as_file.yaml"
     dir_path.mkdir()
 
@@ -194,12 +192,12 @@ scenarios:
     config = load_and_compile_config(config_path)
 
     assert config.scenarios[0].base_url is not None
-    assert str(config.scenarios[0].base_url).rstrip("/") == "https://api.example.com"
+    base_url_str = str(config.scenarios[0].base_url).rstrip("/")
+    assert base_url_str == "https://api.example.com"
 
 
 def test_scenario_with_own_base_url_and_no_global(tmp_path: Path) -> None:
-    """Verifies scenario works when specifying its own
-    base_url without any global block."""
+    """Verifies scenario works when specifying its own base_url without global block."""
     config_path = tmp_path / "config.yaml"
 
     config_path.write_text(
@@ -222,7 +220,9 @@ scenarios:
 
     config = load_and_compile_config(config_path)
 
-    assert str(config.scenarios[0].base_url).rstrip("/") == "https://self.example.com"
+    assert config.scenarios[0].base_url is not None
+    base_url_str = str(config.scenarios[0].base_url).rstrip("/")
+    assert base_url_str == "https://self.example.com"
     assert config.scenarios[0].steps[0].request.timeout == 10.0
 
 
@@ -356,7 +356,7 @@ scenarios:
 
     config = load_and_compile_config(config_path)
 
-    assert config.scenarios[0].steps[0].expect.compiled_schema is None
+    assert config.scenarios[0].steps[0].expect._compiled_schema is None
 
 
 # ============================================================================
@@ -397,7 +397,7 @@ scenarios:
 
     config = load_and_compile_config(config_path)
 
-    schema_func = config.scenarios[0].steps[0].expect.compiled_schema
+    schema_func = config.scenarios[0].steps[0].expect._compiled_schema
 
     assert schema_func is not None
     assert schema_func({"id": 123}) == {"id": 123}
@@ -448,7 +448,7 @@ scenarios:
 
     config = load_and_compile_config(config_path)
 
-    schema_func = config.scenarios[0].steps[0].expect.compiled_schema
+    schema_func = config.scenarios[0].steps[0].expect._compiled_schema
 
     assert schema_func is not None
     assert schema_func({"id": 1}) == {"id": 1}
@@ -457,8 +457,7 @@ scenarios:
 def test_external_schema_compiled_relative_to_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verifies fallback resolution of external schema relative
-    to current working directory."""
+    """Verifies fallback resolution of external schema relative to CWD."""
     yaml_dir = tmp_path / "yaml_dir"
     yaml_dir.mkdir()
 
@@ -467,7 +466,6 @@ def test_external_schema_compiled_relative_to_cwd(
 
     monkeypatch.chdir(cwd_dir)
 
-    # Schema file exists ONLY in CWD, NOT in yaml_dir
     schema_in_cwd = cwd_dir / "cwd_schema.json"
     schema_in_cwd.write_text(
         json.dumps({"type": "object", "required": ["ok"]}),
@@ -498,7 +496,7 @@ scenarios:
 
     config = load_and_compile_config(config_path)
 
-    schema_func = config.scenarios[0].steps[0].expect.compiled_schema
+    schema_func = config.scenarios[0].steps[0].expect._compiled_schema
 
     assert schema_func is not None
     assert schema_func({"ok": True}) == {"ok": True}
@@ -536,8 +534,7 @@ scenarios:
 
 
 def test_external_schema_invalid_json_raises_error(tmp_path: Path) -> None:
-    """Verifies JSON decode errors or
-    file read errors on schema files raise ConfigCompilerError."""
+    """Verifies JSON decode errors on schema files raise ConfigCompilerError."""
     schema_path = tmp_path / "bad_schema.json"
     schema_path.write_text("{ invalid json structure", encoding="utf-8")
 

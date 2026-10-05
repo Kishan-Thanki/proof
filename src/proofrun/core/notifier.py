@@ -8,14 +8,14 @@ from typing import Protocol
 import httpx
 from rich.console import Console
 
-from proof.core.state import Status
+from proofrun.core.state import Status
 
 console = Console()
 
 
 @dataclass(frozen=True)
 class NotificationEvent:
-    """Describes a scenario health-state transition."""
+    """Data payload for a scenario health-state transition notification."""
 
     scenario_name: str
     old_status: Status

@@ -1,4 +1,4 @@
-"""Command Line Interface for Proof synthetic API monitoring daemon.
+"""Command Line Interface for Proofrun synthetic API monitoring daemon.
 
 Provides terminal rendering and workflow orchestration for running synthetic
 monitoring scenarios using Typer and Rich.
@@ -19,20 +19,19 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from proof.core.config_manager import ConfigManager
-from proof.core.engine import ScenarioResult, ScenarioRunner
-from proof.core.notifier import (
+from proofrun import __version__
+from proofrun.core.engine import ScenarioResult, ScenarioRunner
+from proofrun.core.notifier import (
     NotificationEvent,
     Notifier,
     WebhookNotifier,
 )
-from proof.core.state import StateManager, Status
-
-__version__ = "0.1.0"
+from proofrun.core.provider import ConfigProvider
+from proofrun.core.state import StateManager, Status
 
 app = typer.Typer(
-    name="proof",
-    help="High-performance synthetic API monitoring daemon.",
+    name="proofrun",
+    help="Synthetic API monitoring as code daemon.",
     add_completion=False,
 )
 
@@ -40,29 +39,13 @@ console = Console()
 
 
 def version_callback(value: bool) -> None:
-    """Print the Proof version and exit."""
+    """Print the Proofrun version and exit."""
     if value:
         console.print(
-            f"[bold cyan]Proof[/bold cyan] "
+            f"[bold cyan]Proofrun[/bold cyan] "
             f"version [bold green]{__version__}[/bold green]"
         )
         raise typer.Exit(code=0)
-
-
-@app.callback()
-def main(
-    version: Annotated[
-        bool | None,
-        typer.Option(
-            "--version",
-            "-v",
-            help="Show Proof version and exit.",
-            callback=version_callback,
-            is_eager=True,
-        ),
-    ] = None,
-) -> None:
-    """Proof - Synthetic API Monitoring Daemon."""
 
 
 def render_scenario_result(result: ScenarioResult) -> None:
@@ -127,7 +110,7 @@ def render_scenario_result(result: ScenarioResult) -> None:
 
 
 async def execute_config(
-    config_manager: ConfigManager,
+    config_provider: ConfigProvider,
     client: httpx.AsyncClient,
     state_manager: StateManager | None = None,
     notifier: Notifier | None = None,
@@ -135,7 +118,7 @@ async def execute_config(
     """Load and execute all scenarios concurrently.
 
     Args:
-        config_manager: Cached configuration manager.
+        config_provider: Cached configuration provider.
         client: Reusable HTTP client for connection pooling.
         state_manager: Tracks historical health across execution cycles.
         notifier: Optional notification destination for state transitions.
@@ -143,22 +126,25 @@ async def execute_config(
     Returns:
         A tuple containing (all_passed, smallest_configured_interval).
     """
-    proof_config, config_error = config_manager.load()
+    proofrun_config, config_error = config_provider.load()
 
     if config_error is not None:
         console.print(f"[bold red]Configuration Error:[/bold red] {config_error}")
 
-        if proof_config is None:
+        if proofrun_config is None:
             return False, 60
 
         console.print("[yellow]Using last known-good configuration.[/yellow]")
 
-    if proof_config is None:
+    if proofrun_config is None:
         console.print("[bold red]No valid configuration is available.[/bold red]")
         return False, 60
 
-    runners = [ScenarioRunner(scenario) for scenario in proof_config.scenarios]
+    if state_manager is not None:
+        active_scenario_names = {s.name for s in proofrun_config.scenarios}
+        state_manager.sync(active_scenario_names)
 
+    runners = [ScenarioRunner(scenario) for scenario in proofrun_config.scenarios]
     tasks = [runner.run(client) for runner in runners]
 
     results = await asyncio.gather(*tasks)
@@ -168,7 +154,7 @@ async def execute_config(
 
     for result, scenario in zip(
         results,
-        proof_config.scenarios,
+        proofrun_config.scenarios,
         strict=True,
     ):
         scenario_intervals.append(scenario.interval_seconds)
@@ -223,7 +209,7 @@ async def execute_config(
     return all_passed, interval
 
 
-@app.command(name="run")
+@app.command()
 def run_command(
     config_path: Annotated[
         Path,
@@ -239,7 +225,7 @@ def run_command(
         bool,
         typer.Option(
             "--once/--daemon",
-            help=("Run scenarios once and exit, or loop continuously in daemon mode."),
+            help="Run scenarios once and exit, or loop continuously in daemon mode.",
         ),
     ] = True,
     interval: Annotated[
@@ -248,7 +234,7 @@ def run_command(
             "--interval",
             "-i",
             min=1,
-            help=("Override configured scenario interval in seconds for daemon mode."),
+            help="Override configured scenario interval in seconds for daemon mode.",
         ),
     ] = None,
     webhook_url: Annotated[
@@ -259,15 +245,25 @@ def run_command(
             help="HTTP webhook URL for state transition alerts.",
         ),
     ] = None,
+    _show_version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            "-v",
+            help="Show Proofrun version and exit.",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = None,
 ) -> None:
     """Execute synthetic monitoring scenarios defined in YAML."""
     console.print(
-        f"[bold cyan]Proof[/bold cyan] executing config: "
+        f"[bold cyan]Proofrun[/bold cyan] executing config: "
         f"[bold yellow]{config_path}[/bold yellow]\n"
     )
 
     async def _run_loop() -> int:
-        config_manager = ConfigManager(config_path)
+        config_provider = ConfigProvider(config_path)
         state_manager = StateManager()
 
         async with httpx.AsyncClient() as client:
@@ -281,7 +277,7 @@ def run_command(
 
             if once:
                 passed, _ = await execute_config(
-                    config_manager,
+                    config_provider,
                     client,
                 )
 
@@ -294,7 +290,7 @@ def run_command(
 
             while True:
                 _, config_interval = await execute_config(
-                    config_manager,
+                    config_provider,
                     client,
                     state_manager,
                     notifier,
@@ -316,16 +312,14 @@ def run_command(
                 await asyncio.sleep(sleep_time)
 
     try:
-        exit_code = asyncio.run(_run_loop())
-
-        if exit_code is not None:
-            raise typer.Exit(code=exit_code)
-
+        exit_code = uvloop.run(_run_loop())
     except KeyboardInterrupt:
         console.print("\n[yellow]Daemon execution stopped by user.[/yellow]")
         raise typer.Exit(code=0) from None
 
+    raise typer.Exit(code=exit_code)
 
-if __name__ == "__main__":
-    uvloop.install()
+
+def main() -> None:
+    """Run the Proofrun CLI."""
     app()

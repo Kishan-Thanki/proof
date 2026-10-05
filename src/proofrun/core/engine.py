@@ -1,4 +1,4 @@
-"""Asynchronous HTTP execution engine for Proof synthetic monitoring.
+"""Asynchronous HTTP execution engine for Proofrun synthetic monitoring.
 
 This module executes multi-step HTTP monitoring scenarios using httpx,
 evaluates response assertions, extracts runtime variables into
@@ -11,8 +11,8 @@ from typing import Any
 
 import httpx
 
-from proof.core.config import ScenarioConfig, StepConfig
-from proof.core.context import ExecutionContext
+from proofrun.core.config import ScenarioConfig, StepConfig
+from proofrun.core.context import ExecutionContext
 
 
 class EngineError(Exception):
@@ -70,7 +70,7 @@ class ScenarioRunner:
         2. Validate the resolved request timeout.
         3. Interpolate path, headers, query parameters, and JSON payload.
         4. Execute the HTTP request.
-        5. Validate the HTTP status code.
+        5. Validate the HTTP status code(s).
         6. Validate the latency ceiling.
         7. Validate expected response headers.
         8. Parse JSON when schema validation or extraction is required.
@@ -118,10 +118,15 @@ class ScenarioRunner:
 
             latency_ms = (perf_counter() - start_time) * 1000
 
-            if response.status_code != step.expect.status:
+            expected_statuses = (
+                [step.expect.status]
+                if isinstance(step.expect.status, int)
+                else step.expect.status
+            )
+            if response.status_code not in expected_statuses:
                 raise EngineError(
-                    f"Status code mismatch: expected "
-                    f"{step.expect.status}, got {response.status_code}"
+                    f"Status code mismatch: expected one of "
+                    f"{expected_statuses}, got {response.status_code}"
                 )
 
             if (
@@ -146,7 +151,7 @@ class ScenarioRunner:
 
             response_data: Any = None
 
-            if step.expect.compiled_schema is not None or step.extract:
+            if step.expect._compiled_schema is not None or step.extract:
                 try:
                     response_data = response.json()
                 except Exception as err:
@@ -154,9 +159,9 @@ class ScenarioRunner:
                         f"Response body is not valid JSON: {err}"
                     ) from err
 
-            if step.expect.compiled_schema is not None:
+            if step.expect._compiled_schema is not None:
                 try:
-                    step.expect.compiled_schema(response_data)
+                    step.expect._compiled_schema(response_data)
                 except Exception as err:
                     raise EngineError(f"Schema assertion failed: {err}") from err
 
