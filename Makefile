@@ -1,5 +1,7 @@
 .PHONY: install test coverage coverage-html lint format format-check typecheck check \
-	run-profile run-auth run-chain run-crud build clean
+	run-profile run-auth run-chain run-crud build clean full ci
+
+full: clean install check build
 
 install:
 	uv sync --group dev
@@ -22,10 +24,10 @@ lint:
 
 format:
 	uv run ruff format src/ tests/
-	uv run ruff check --fix src/ tests/
 
 format-check:
 	uv run ruff format --check src/ tests/
+	uv run ruff check src/ tests/
 
 typecheck:
 	uv run pyright
@@ -36,7 +38,13 @@ run-profile:
 	uv run proofrun scenarios/profile.yaml --once
 
 run-auth:
-	uv run proofrun scenarios/auth.yaml --once
+	python scenarios/server.py & \
+	SERVER_PID=$$!; \
+	sleep 1; \
+	uv run proofrun scenarios/auth.yaml --once; \
+	EXIT_CODE=$$?; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	exit $$EXIT_CODE
 
 run-chain:
 	uv run proofrun scenarios/chain.yaml --once

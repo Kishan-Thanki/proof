@@ -317,7 +317,7 @@ def run_command(
         console.print("\n[yellow]Daemon execution stopped by user.[/yellow]")
         raise typer.Exit(code=0) from None
 
-    raise typer.Exit(code=exit_code)
+    raise typer.Exit(code=exit_code)  # pragma: no cover
 
 
 def main() -> None:

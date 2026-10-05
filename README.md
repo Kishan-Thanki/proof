@@ -5,7 +5,7 @@
 **Write an API workflow in YAML. Run it locally, in CI, or as a monitor that only alerts when health changes.**
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![CI](https://github.com/Kishan-Thanki/proof/actions/workflows/ci.yml/badge.svg)](https://github.com/Kishan-Thanki/proof/actions/workflows/ci.yml)
+[![CI](https://github.com/Kishan-Thanki/proof/actions/workflows/ci.yaml/badge.svg)](https://github.com/Kishan-Thanki/proof/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/Kishan-Thanki/proof?color=blue&logo=github)](https://github.com/Kishan-Thanki/proof/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -41,10 +41,10 @@ And when everything is fine:
 **1. Install** (Python 3.11+):
 
 ```bash
-pipx install proofrun
+pip install proofrun
 ```
 
-Or with pip: `pip install proofrun`
+Or with pip: `pipx install proofrun`
 
 **2. Create `health.yaml`:**
 

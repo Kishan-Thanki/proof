@@ -43,23 +43,15 @@ jobs:
       - name: Install dependencies
         run: make install
 
-      - name: Check formatting
-        run: make format-check
+      - name: Run code quality & coverage checks
+        run: make check
 
-      - name: Lint
-        run: make lint
-
-      - name: Type check
-        run: make typecheck
-
-      - name: Run tests with coverage
-        run: make coverage
-
-      - name: Smoke test profile scenario
-        run: make run-profile
-
-      - name: Smoke test chain scenario
-        run: make run-chain
+      - name: Run integration scenarios
+        run: |
+          make run-profile
+          make run-auth
+          make run-chain
+          make run-crud
 
   build:
     name: Build Package
